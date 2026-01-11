@@ -1,0 +1,7 @@
+{
+  "name": "ArtGrid Overlay",
+  "description": "A professional tool for artists to overlay multi-level grids on images for better proportion and perspective control.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
