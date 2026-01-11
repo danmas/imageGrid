@@ -8,6 +8,14 @@ export interface GridSettings {
   color: string;
 }
 
+export interface PaletteSettings {
+  colors: string[];
+  activeIndex: number;
+  isVisible: boolean;
+  isMinimized: boolean;
+  position: { x: number; y: number };
+}
+
 export interface ImageState {
   url: string | null;
   width: number;
