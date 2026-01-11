@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GridOverlay } from './components/GridOverlay';
 import { GridSettings, ImageState } from './types';
 import { 
@@ -12,8 +12,10 @@ import {
   Layers,
   Square,
   ChevronDown,
-  ChevronUp,
-  X
+  Maximize,
+  ZoomIn,
+  ZoomOut,
+  RefreshCw
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -26,9 +28,17 @@ const App: React.FC = () => {
     isSquare: false,
     color: '#ffffff'
   });
+  
+  // Viewport transformation state
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isControlsMinimized, setIsControlsMinimized] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const lastPositionRef = useRef({ x: 0, y: 0 });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -42,14 +52,21 @@ const App: React.FC = () => {
           height: img.height
         });
         setIsControlsMinimized(false);
+        resetView();
       };
       img.src = url;
     }
   };
 
-  const toggleVisibility = () => {
+  const resetView = useCallback(() => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+    lastPositionRef.current = { x: 0, y: 0 };
+  }, []);
+
+  const toggleVisibility = useCallback(() => {
     setSettings(prev => ({ ...prev, isVisible: !prev.isVisible }));
-  };
+  }, []);
 
   // Sync divisions if square mode is on
   useEffect(() => {
@@ -66,8 +83,44 @@ const App: React.FC = () => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
+  // Panning logic
+  const handleStart = (clientX: number, clientY: number) => {
+    if (!image.url) return;
+    setIsDragging(false);
+    dragStartRef.current = { x: clientX, y: clientY };
+    lastPositionRef.current = { ...position };
+  };
+
+  const handleMove = (clientX: number, clientY: number) => {
+    if (!image.url) return;
+    const dx = clientX - dragStartRef.current.x;
+    const dy = clientY - dragStartRef.current.y;
+    
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      setIsDragging(true);
+      setPosition({
+        x: lastPositionRef.current.x + dx,
+        y: lastPositionRef.current.y + dy
+      });
+    }
+  };
+
+  const handleEnd = () => {
+    if (!isDragging && image.url) {
+      toggleVisibility();
+    }
+    setIsDragging(false);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!image.url) return;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.min(Math.max(0.2, scale * delta), 10);
+    setScale(newScale);
+  };
+
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-white relative">
+    <div className="flex flex-col h-full bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-white relative touch-none select-none">
       {/* Header */}
       <header className="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center z-20 shadow-lg shrink-0">
         <div className="flex items-center gap-2">
@@ -93,11 +146,17 @@ const App: React.FC = () => {
       {/* Main Viewport */}
       <main 
         ref={containerRef}
-        onClick={() => image.url && toggleVisibility()}
-        className="flex-1 relative overflow-hidden flex items-center justify-center p-4 cursor-pointer group"
+        onWheel={handleWheel}
+        onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+        onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
+        onMouseUp={handleEnd}
+        onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+        onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
+        onTouchEnd={handleEnd}
+        className="flex-1 relative overflow-hidden flex items-center justify-center p-4 cursor-grab active:cursor-grabbing"
       >
         {!image.url ? (
-          <div className="text-center space-y-4 max-w-xs animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="text-center space-y-4 max-w-xs animate-in fade-in slide-in-from-bottom-4 duration-700 pointer-events-none">
             <div className="w-20 h-20 bg-slate-800 rounded-3xl flex items-center justify-center mx-auto mb-6">
               <ImageIcon className="text-slate-600 w-10 h-10" />
             </div>
@@ -107,28 +166,38 @@ const App: React.FC = () => {
             </p>
             <button 
               onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-              className="mt-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-6 py-3 rounded-2xl w-full flex items-center justify-center gap-2 transition-colors"
+              className="mt-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-6 py-3 rounded-2xl w-full flex items-center justify-center gap-2 transition-colors pointer-events-auto"
             >
               <Camera size={20} />
               Выбрать изображение
             </button>
           </div>
         ) : (
-          <div className="relative max-w-full max-h-full shadow-2xl rounded-sm overflow-hidden border border-slate-800 transition-transform duration-500">
-            <img 
-              src={image.url} 
-              alt="Workspace" 
-              className="max-w-full max-h-[85vh] object-contain block"
-            />
-            <GridOverlay 
-              settings={settings} 
-              imageWidth={image.width} 
-              imageHeight={image.height} 
-            />
-            
-            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-[10px] uppercase tracking-widest text-slate-300 pointer-events-none">
-              Tap image to toggle grid
+          <div 
+            className="relative transition-transform duration-75 ease-out will-change-transform"
+            style={{ 
+              transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            }}
+          >
+            <div className="relative shadow-2xl rounded-sm overflow-hidden border border-slate-800">
+              <img 
+                src={image.url} 
+                alt="Workspace" 
+                draggable={false}
+                className="max-w-[80vw] max-h-[75vh] object-contain block pointer-events-none"
+              />
+              <GridOverlay 
+                settings={settings} 
+                imageWidth={image.width} 
+                imageHeight={image.height} 
+              />
             </div>
+          </div>
+        )}
+        
+        {image.url && (
+           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full text-[10px] uppercase tracking-widest text-slate-400 pointer-events-none z-10">
+            {Math.round(scale * 100)}% • Drag to Pan • Tap to Toggle
           </div>
         )}
       </main>
@@ -151,12 +220,12 @@ const App: React.FC = () => {
               <Settings2 size={24} className="text-white" />
             </button>
           ) : (
-            <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-slate-900/95 backdrop-blur-2xl border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
               {/* Panel Header */}
               <div className="p-3 bg-slate-800/50 flex justify-between items-center border-b border-slate-700">
                 <div className="flex items-center gap-2">
                   <Settings2 size={16} className="text-blue-400" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Настройки</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Инструменты</span>
                 </div>
                 <div className="flex gap-1">
                   <button 
@@ -169,8 +238,38 @@ const App: React.FC = () => {
               </div>
 
               {/* Panel Content */}
-              <div className="p-5 space-y-5 overflow-y-auto max-h-[60vh]">
-                <div className="flex justify-between items-center">
+              <div className="p-5 space-y-5 overflow-y-auto max-h-[65vh]">
+                
+                {/* Zoom Controls */}
+                <div className="space-y-3">
+                  <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                    <span>Увеличение</span>
+                    <span className="text-blue-400">{Math.round(scale * 100)}%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setScale(s => Math.max(0.2, s - 0.2))}
+                      className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"
+                    >
+                      <ZoomOut size={18} />
+                    </button>
+                    <button 
+                      onClick={resetView}
+                      title="Сброс вида"
+                      className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"
+                    >
+                      <RefreshCw size={18} />
+                    </button>
+                    <button 
+                      onClick={() => setScale(s => Math.min(10, s + 0.2))}
+                      className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"
+                    >
+                      <ZoomIn size={18} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center gap-2">
                    <button 
                     onClick={() => updateSetting('isSquare', !settings.isSquare)}
                     className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${
@@ -182,7 +281,6 @@ const App: React.FC = () => {
                     <Square size={14} />
                     <span>КВАДРАТ</span>
                   </button>
-                  <div className="w-2" />
                   <button 
                     onClick={toggleVisibility}
                     className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${
@@ -192,15 +290,15 @@ const App: React.FC = () => {
                     }`}
                   >
                     {settings.isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
-                    <span>ВИДИМОСТЬ</span>
+                    <span>СЕТКА</span>
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-4 pt-2 border-t border-slate-800">
                   {/* Vertical Columns Slider */}
                   <div className="space-y-2">
                     <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                      <span>{settings.isSquare ? 'Ячейки (Ш)' : 'По горизонтали'}</span>
+                      <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
                       <span className="text-blue-400">{settings.vDivisions}</span>
                     </div>
                     <input 
@@ -214,7 +312,7 @@ const App: React.FC = () => {
                   {/* Horizontal Rows Slider */}
                   <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
                     <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                      <span>По вертикали</span>
+                      <span>Ряды</span>
                       <span className="text-blue-400">{settings.hDivisions}</span>
                     </div>
                     <input 
@@ -243,7 +341,7 @@ const App: React.FC = () => {
                 
                 {/* Color Selection */}
                 <div className="flex justify-between gap-2 pt-2">
-                    {['#ffffff', '#000000', '#ff0000', '#00ff00', '#0088ff', '#ffff00'].map(color => (
+                    {['#ffffff', '#000000', '#ff3e3e', '#3eff3e', '#3e8cff', '#ffff3e'].map(color => (
                         <button 
                             key={color}
                             onClick={() => updateSetting('color', color)}
@@ -260,7 +358,7 @@ const App: React.FC = () => {
       
       {!image.url && (
           <div className="absolute bottom-6 left-0 right-0 text-center text-slate-700 text-[10px] uppercase tracking-widest animate-pulse pointer-events-none">
-            Grid Master v1.3
+            Grid Master v1.4 • Pro Artist Tool
           </div>
       )}
     </div>
