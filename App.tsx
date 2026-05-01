@@ -1,12 +1,13 @@
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GridOverlay } from './components/GridOverlay';
-import { GridSettings, ImageState, PaletteSettings, CropArea } from './types';
+import { GridSettings, ImageState, PaletteSettings, CropArea, ImageAdjustments } from './types';
 import { 
   Upload, 
   Eye, 
   EyeOff, 
   Settings2, 
+  Sun,
   Image as ImageIcon,
   Camera,
   Layers,
@@ -25,6 +26,39 @@ import {
   Check,
   X as CloseIcon
 } from 'lucide-react';
+
+const SliderWithArrows = ({ label, value, onChange, min = -100, max = 100 }: { label: string, value: number, onChange: (v: number) => void, min?: number, max?: number }) => (
+  <div className="space-y-2">
+    <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+      <span>{label}</span>
+      <span className={value !== 0 ? "text-blue-400" : ""}>{value > 0 ? `+${value}` : value}</span>
+    </div>
+    <div className="flex items-center gap-2">
+      <button 
+        onClick={() => onChange(Math.max(min, value - 5))}
+        className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 active:scale-95 transition-all flex-shrink-0"
+      >
+        <Minus size={14} />
+      </button>
+      <input 
+        type="range" 
+        min={min} 
+        max={max} 
+        step="1" 
+        value={value} 
+        onChange={(e) => onChange(parseInt(e.target.value))} 
+        onDoubleClick={() => onChange(0)}
+        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" 
+      />
+      <button 
+        onClick={() => onChange(Math.min(max, value + 5))}
+        className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 active:scale-95 transition-all flex-shrink-0"
+      >
+        <Plus size={14} />
+      </button>
+    </div>
+  </div>
+);
 
 const App: React.FC = () => {
   const [image, setImage] = useState<ImageState>({ url: null, width: 0, height: 0 });
@@ -48,10 +82,12 @@ const App: React.FC = () => {
   const [isPipetteActive, setIsPipetteActive] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
   const [cropArea, setCropArea] = useState<CropArea>({ x: 0, y: 0, width: 100, height: 100 });
+  const [adjustments, setAdjustments] = useState<ImageAdjustments>({ shadows: 0, highlights: 0 });
   
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isControlsMinimized, setIsControlsMinimized] = useState(false);
+  const [isGridMinimized, setIsGridMinimized] = useState(false);
+  const [isLightMinimized, setIsLightMinimized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +119,8 @@ const App: React.FC = () => {
           height: img.height
         });
         updateOffscreenCanvas(img);
-        setIsControlsMinimized(false);
+        setIsGridMinimized(false);
+        setIsLightMinimized(false);
         resetView();
       };
       img.src = url;
@@ -110,6 +147,37 @@ const App: React.FC = () => {
     }
   }, [settings.isSquare, settings.vDivisions, image.width, image.height]);
 
+  const filterTableValues = useMemo(() => {
+    const shadowVal = adjustments.shadows / 100;
+    const highlightVal = adjustments.highlights / 100;
+    
+    const points = [];
+    for (let i = 0; i <= 20; i++) {
+        let x = i / 20;
+        let y = x;
+        if (x <= 0.5) {
+            y += Math.sin(x * Math.PI * 2) * shadowVal * 0.25;
+        } else {
+            y += Math.sin((x - 0.5) * Math.PI * 2) * highlightVal * 0.25;
+        }
+        points.push(Math.max(0, Math.min(1, y)).toFixed(4));
+    }
+    return points.join(' ');
+  }, [adjustments.shadows, adjustments.highlights]);
+
+  const applyCurve = useCallback((val: number) => {
+    const shadowVal = adjustments.shadows / 100;
+    const highlightVal = adjustments.highlights / 100;
+    let x = val / 255;
+    let y = x;
+    if (x <= 0.5) {
+        y += Math.sin(x * Math.PI * 2) * shadowVal * 0.25;
+    } else {
+        y += Math.sin((x - 0.5) * Math.PI * 2) * highlightVal * 0.25;
+    }
+    return Math.max(0, Math.min(255, Math.round(y * 255)));
+  }, [adjustments.shadows, adjustments.highlights]);
+
   const sampleColorAt = (clientX: number, clientY: number) => {
     if (!offscreenCanvasRef.current || !image.url || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -122,7 +190,10 @@ const App: React.FC = () => {
       const ctx = offscreenCanvasRef.current.getContext('2d');
       const pixel = ctx?.getImageData(Math.floor(imgX), Math.floor(imgY), 1, 1).data;
       if (pixel) {
-        const hex = `#${((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1)}`;
+        const r = applyCurve(pixel[0]);
+        const g = applyCurve(pixel[1]);
+        const b = applyCurve(pixel[2]);
+        const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
         const newColors = [...palette.colors];
         newColors[palette.activeIndex] = hex;
         setPalette(prev => ({ ...prev, colors: newColors }));
@@ -290,6 +361,17 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-white relative touch-none select-none">
+      {/* Global SVG Filters */}
+      <svg width="0" height="0" className="absolute pointer-events-none" style={{ position: 'absolute', width: 0, height: 0, visibility: 'hidden' }}>
+        <filter id={`shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights}`} colorInterpolationFilters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="table" tableValues={filterTableValues} />
+            <feFuncG type="table" tableValues={filterTableValues} />
+            <feFuncB type="table" tableValues={filterTableValues} />
+          </feComponentTransfer>
+        </filter>
+      </svg>
+
       <header className="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center z-20 shadow-lg shrink-0">
         <div className="flex items-center gap-2">
           <Layers className="text-blue-500 w-6 h-6" />
@@ -368,7 +450,13 @@ const App: React.FC = () => {
             style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${scale})` }}
           >
             <div className="relative shadow-2xl rounded-sm overflow-hidden border border-slate-800">
-              <img src={image.url} alt="Workspace" draggable={false} className="max-w-[80vw] max-h-[75vh] object-contain block pointer-events-none" />
+              <img 
+                src={image.url} 
+                alt="Workspace" 
+                draggable={false} 
+                className="max-w-[80vw] max-h-[75vh] object-contain block pointer-events-none" 
+                style={{ filter: (adjustments.shadows !== 0 || adjustments.highlights !== 0) ? `url(#shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights})` : 'none' }}
+              />
               
               {!isCropping && <GridOverlay settings={settings} imageWidth={image.width} imageHeight={image.height} />}
               
@@ -511,79 +599,118 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Floating Settings Panel */}
+      {/* Floating Settings Panels */}
       {image.url && !isCropping && (
-        <div 
-          className={`fixed right-6 bottom-6 z-30 transition-all duration-300 ease-in-out ${isControlsMinimized ? 'w-12 h-12' : 'w-[calc(100vw-3rem)] sm:w-80 h-auto'}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {isControlsMinimized ? (
-            <button onClick={() => setIsControlsMinimized(false)} className="w-12 h-12 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center shadow-2xl">
-              <Settings2 size={24} className="text-white" />
-            </button>
-          ) : (
-            <div className="bg-slate-900/95 backdrop-blur-2xl border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-              <div className="p-3 bg-slate-800/50 flex justify-between items-center border-b border-slate-700">
-                <div className="flex items-center gap-2 text-slate-300">
-                  <Settings2 size={16} className="text-blue-400" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Инструменты</span>
+        <div className="fixed right-6 bottom-6 z-30 flex flex-col gap-4 items-end pointer-events-none">
+          {/* Light Controls */}
+          <div className="pointer-events-auto origin-bottom-right transition-all">
+            {isLightMinimized ? (
+              <button 
+                onClick={() => setIsLightMinimized(false)} 
+                className="w-12 h-12 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full flex items-center justify-center shadow-2xl group transition-all"
+                title="Развернуть Инструменты Света"
+              >
+                <Sun size={22} className="text-amber-400 group-hover:scale-110 transition-transform" />
+              </button>
+            ) : (
+              <div className="w-[calc(100vw-3rem)] sm:w-80 bg-slate-900/95 backdrop-blur-2xl border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-2 fade-in duration-200">
+                <div className="p-3 bg-slate-800/50 flex justify-between items-center border-b border-slate-700">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Sun size={16} className="text-amber-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Инструменты Света</span>
+                  </div>
+                  <button onClick={() => setIsLightMinimized(true)} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400"><ChevronDown size={18} /></button>
                 </div>
-                <button onClick={() => setIsControlsMinimized(true)} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400"><ChevronDown size={18} /></button>
+                <div className="p-5 space-y-5">
+                  <SliderWithArrows 
+                    label="Тени" 
+                    value={adjustments.shadows} 
+                    onChange={(v: number) => setAdjustments(s => ({...s, shadows: v}))} 
+                  />
+                  <SliderWithArrows 
+                    label="Света" 
+                    value={adjustments.highlights} 
+                    onChange={(v: number) => setAdjustments(s => ({...s, highlights: v}))} 
+                  />
+                </div>
               </div>
+            )}
+          </div>
 
-              <div className="p-5 space-y-5 overflow-y-auto max-h-[65vh]">
-                <div className="space-y-3">
-                  <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    <span>Вид</span>
+          {/* Grid Controls */}
+          <div className="pointer-events-auto origin-bottom-right transition-all">
+            {isGridMinimized ? (
+              <button 
+                onClick={() => setIsGridMinimized(false)} 
+                className="w-12 h-12 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center shadow-2xl group transition-all"
+                title="Развернуть Инструменты Сетка"
+              >
+                <Settings2 size={22} className="text-white group-hover:scale-110 transition-transform" />
+              </button>
+            ) : (
+              <div className="w-[calc(100vw-3rem)] sm:w-80 bg-slate-900/95 backdrop-blur-2xl border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-2 fade-in duration-200">
+                <div className="p-3 bg-slate-800/50 flex justify-between items-center border-b border-slate-700">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Settings2 size={16} className="text-blue-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Инструменты Сетка</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setScale(s => Math.max(0.1, s - 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomOut size={18} /></button>
-                    <button onClick={resetView} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><RefreshCw size={18} /></button>
-                    <button onClick={() => setScale(s => Math.min(20, s + 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomIn size={18} /></button>
-                  </div>
+                  <button onClick={() => setIsGridMinimized(true)} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400"><ChevronDown size={18} /></button>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                   <button 
-                    onClick={() => { setIsCropping(true); setIsPipetteActive(false); setCropArea({x: 10, y: 10, width: 80, height: 80}); }} 
-                    className="flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border text-slate-300 bg-slate-800 border-slate-700"
-                  >
-                    <Crop size={14} /><span>ОБРЕЗАТЬ</span>
-                  </button>
-                   <button onClick={() => setSettings(s => ({ ...s, isSquare: !s.isSquare }))} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isSquare ? 'text-blue-400 bg-blue-400/10 border-blue-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
-                    <Square size={14} /><span>КВАДРАТ</span>
-                  </button>
-                  <button onClick={toggleVisibility} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isVisible ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
-                    {settings.isVisible ? <Eye size={14} /> : <EyeOff size={14} />}<span>СЕТКА</span>
-                  </button>
-                </div>
-
-                <div className="space-y-4 pt-2 border-t border-slate-800">
-                  <div className="space-y-2">
+                <div className="p-5 space-y-5 overflow-y-auto max-h-[65vh]">
+                  <div className="space-y-3">
                     <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                      <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
-                      <span className="text-blue-400">{settings.vDivisions}</span>
+                      <span>Вид</span>
                     </div>
-                    <input type="range" min="1" max="40" step="1" value={settings.vDivisions} onChange={(e) => setSettings(s => ({...s, vDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setScale(s => Math.max(0.1, s - 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomOut size={18} /></button>
+                      <button onClick={resetView} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><RefreshCw size={18} /></button>
+                      <button onClick={() => setScale(s => Math.min(20, s + 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomIn size={18} /></button>
+                    </div>
                   </div>
-                  <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
-                    <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Ряды</span><span className="text-blue-400">{settings.hDivisions}</span></div>
-                    <input type="range" min="1" max="40" step="1" value={settings.hDivisions} disabled={settings.isSquare} onChange={(e) => setSettings(s => ({...s, hDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+
+                  <div className="flex flex-wrap gap-2">
+                     <button 
+                      onClick={() => { setIsCropping(true); setIsPipetteActive(false); setCropArea({x: 10, y: 10, width: 80, height: 80}); }} 
+                      className="flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border text-slate-300 bg-slate-800 border-slate-700"
+                    >
+                      <Crop size={14} /><span>ОБРЕЗАТЬ</span>
+                    </button>
+                     <button onClick={() => setSettings(s => ({ ...s, isSquare: !s.isSquare }))} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isSquare ? 'text-blue-400 bg-blue-400/10 border-blue-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
+                      <Square size={14} /><span>КВАДРАТ</span>
+                    </button>
+                    <button onClick={toggleVisibility} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isVisible ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
+                      {settings.isVisible ? <Eye size={14} /> : <EyeOff size={14} />}<span>СЕТКА</span>
+                    </button>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Детализация</span><span className="text-blue-400">{settings.subDivisions}</span></div>
-                    <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+
+                  <div className="space-y-4 pt-2 border-t border-slate-800">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                        <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
+                        <span className="text-blue-400">{settings.vDivisions}</span>
+                      </div>
+                      <input type="range" min="1" max="40" step="1" value={settings.vDivisions} onChange={(e) => setSettings(s => ({...s, vDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                    </div>
+                    <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
+                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Ряды</span><span className="text-blue-400">{settings.hDivisions}</span></div>
+                      <input type="range" min="1" max="40" step="1" value={settings.hDivisions} disabled={settings.isSquare} onChange={(e) => setSettings(s => ({...s, hDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Детализация</span><span className="text-blue-400">{settings.subDivisions}</span></div>
+                      <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                    </div>
                   </div>
-                </div>
-                
-                <div className="flex justify-between gap-2 pt-2">
-                    {['#ffffff', '#000000', '#ff3e3e', '#3eff3e', '#3e8cff', '#ffff3e'].map(color => (
-                        <button key={color} onClick={() => setSettings(s => ({...s, color}))} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${settings.color === color ? 'border-blue-500 scale-110 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-slate-800'}`} style={{ backgroundColor: color }} />
-                    ))}
+                  
+                  <div className="flex justify-between gap-2 pt-4 border-t border-slate-800">
+                      {['#ffffff', '#000000', '#ff3e3e', '#3eff3e', '#3e8cff', '#ffff3e'].map(color => (
+                          <button key={color} onClick={() => setSettings(s => ({...s, color}))} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${settings.color === color ? 'border-blue-500 scale-110 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-slate-800'}`} style={{ backgroundColor: color }} />
+                      ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>

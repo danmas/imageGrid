@@ -28,3 +28,8 @@ export interface CropArea {
   width: number;
   height: number;
 }
+
+export interface ImageAdjustments {
+  shadows: number;
+  highlights: number;
+}
