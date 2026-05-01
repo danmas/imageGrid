@@ -24,7 +24,8 @@ import {
   Trash2,
   Crop,
   Check,
-  X as CloseIcon
+  X as CloseIcon,
+  Download
 } from 'lucide-react';
 
 const SliderWithArrows = ({ label, value, onChange, min = -100, max = 100 }: { label: string, value: number, onChange: (v: number) => void, min?: number, max?: number }) => (
@@ -241,6 +242,70 @@ const App: React.FC = () => {
     img.src = newUrl;
   };
 
+  const handleSaveImage = useCallback(() => {
+    if (!image.url || !offscreenCanvasRef.current) return;
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(offscreenCanvasRef.current, 0, 0);
+
+    if (adjustments.shadows !== 0 || adjustments.highlights !== 0 || adjustments.brightness !== 0) {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = applyCurve(data[i]);
+        data[i + 1] = applyCurve(data[i + 1]);
+        data[i + 2] = applyCurve(data[i + 2]);
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    if (settings.isVisible) {
+      const { hDivisions, vDivisions, subDivisions, color } = settings;
+      const totalH = hDivisions * subDivisions;
+      const totalV = vDivisions * subDivisions;
+
+      const isCenter = (index: number, total: number) => Math.abs((index / total) - 0.5) < 0.001;
+      const isMain = (index: number) => index % subDivisions === 0;
+
+      ctx.strokeStyle = color;
+      
+      for (let i = 1; i < totalH; i++) {
+        const y = (i / totalH) * canvas.height;
+        ctx.lineWidth = isCenter(i, totalH) ? 2.5 : (isMain(i) ? 1.2 : 0.4);
+        ctx.globalAlpha = isCenter(i, totalH) ? 0.9 : (isMain(i) ? 0.7 : 0.3);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      for (let i = 1; i < totalV; i++) {
+        const x = (i / totalV) * canvas.width;
+        ctx.lineWidth = isCenter(i, totalV) ? 2.5 : (isMain(i) ? 1.2 : 0.4);
+        ctx.globalAlpha = isCenter(i, totalV) ? 0.9 : (isMain(i) ? 0.7 : 0.3);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.8;
+      ctx.strokeRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1.0;
+    }
+
+    const link = document.createElement('a');
+    link.download = `artgrid-export-${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }, [image.width, image.height, image.url, settings, adjustments, applyCurve]);
+
   const handleStart = (clientX: number, clientY: number, target?: EventTarget) => {
     if (!image.url) return;
     
@@ -405,6 +470,16 @@ const App: React.FC = () => {
             </div>
         ) : (
             <div className="flex gap-2">
+                {image.url && (
+                    <button 
+                        onClick={handleSaveImage}
+                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-900/20"
+                        title="Сохранить изображение"
+                    >
+                        <Download size={18} />
+                        <span className="hidden sm:inline">Сохранить</span>
+                    </button>
+                )}
                 <button 
                     onClick={() => setPalette(p => ({ ...p, isVisible: !p.isVisible }))}
                     className={`p-2 rounded-full transition-all active:scale-95 border ${palette.isVisible ? 'bg-blue-600 border-blue-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
