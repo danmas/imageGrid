@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GridOverlay } from './components/GridOverlay';
-import { GridSettings, ImageState, PaletteSettings } from './types';
+import { GridSettings, ImageState, PaletteSettings, CropArea } from './types';
 import { 
   Upload, 
   Eye, 
@@ -20,7 +20,10 @@ import {
   GripHorizontal,
   Plus,
   Minus,
-  Trash2
+  Trash2,
+  Crop,
+  Check,
+  X as CloseIcon
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -43,6 +46,9 @@ const App: React.FC = () => {
   });
 
   const [isPipetteActive, setIsPipetteActive] = useState(false);
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropArea, setCropArea] = useState<CropArea>({ x: 0, y: 0, width: 100, height: 100 });
+  
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isControlsMinimized, setIsControlsMinimized] = useState(false);
@@ -54,6 +60,16 @@ const App: React.FC = () => {
   const dragStartRef = useRef({ x: 0, y: 0 });
   const lastPositionRef = useRef({ x: 0, y: 0 });
   const paletteDragStartRef = useRef<{ x: number, y: number } | null>(null);
+  const cropHandleRef = useRef<string | null>(null);
+
+  const updateOffscreenCanvas = (img: HTMLImageElement) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx?.drawImage(img, 0, 0);
+    offscreenCanvasRef.current = canvas;
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -66,15 +82,7 @@ const App: React.FC = () => {
           width: img.width,
           height: img.height
         });
-        
-        // Prepare offscreen canvas for color picking
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0);
-        offscreenCanvasRef.current = canvas;
-
+        updateOffscreenCanvas(img);
         setIsControlsMinimized(false);
         resetView();
       };
@@ -104,13 +112,9 @@ const App: React.FC = () => {
 
   const sampleColorAt = (clientX: number, clientY: number) => {
     if (!offscreenCanvasRef.current || !image.url || !containerRef.current) return;
-
     const rect = containerRef.current.getBoundingClientRect();
     const viewportX = clientX - rect.left - rect.width / 2;
     const viewportY = clientY - rect.top - rect.height / 2;
-
-    // Convert screen coordinates to original image coordinates
-    // Based on the transformation applied: translate(position.x, position.y) scale(scale)
     const imgX = (viewportX - position.x) / scale + (image.width / 2);
     const imgY = (viewportY - position.y) / scale + (image.height / 2);
 
@@ -126,19 +130,95 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStart = (clientX: number, clientY: number) => {
+  const handleApplyCrop = () => {
+    if (!offscreenCanvasRef.current || !image.url) return;
+    
+    const sourceCanvas = offscreenCanvasRef.current;
+    const cropX = (cropArea.x / 100) * image.width;
+    const cropY = (cropArea.y / 100) * image.height;
+    const cropW = (cropArea.width / 100) * image.width;
+    const cropH = (cropArea.height / 100) * image.height;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = cropW;
+    canvas.height = cropH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    
+    const newUrl = canvas.toDataURL('image/png');
+    const img = new Image();
+    img.onload = () => {
+      setImage({
+        url: newUrl,
+        width: img.width,
+        height: img.height
+      });
+      updateOffscreenCanvas(img);
+      setIsCropping(false);
+      resetView();
+    };
+    img.src = newUrl;
+  };
+
+  const handleStart = (clientX: number, clientY: number, target?: EventTarget) => {
     if (!image.url) return;
+    
+    if (isCropping) {
+        const handle = (target as HTMLElement)?.dataset?.handle;
+        if (handle) {
+            cropHandleRef.current = handle;
+            dragStartRef.current = { x: clientX, y: clientY };
+            lastPositionRef.current = { x: cropArea.x, y: cropArea.y }; // Reusing ref to store initial crop rect values
+            return;
+        }
+    }
+
     if (isPipetteActive) {
       sampleColorAt(clientX, clientY);
       return;
     }
+    
     setIsDragging(false);
     dragStartRef.current = { x: clientX, y: clientY };
     lastPositionRef.current = { ...position };
   };
 
   const handleMove = (clientX: number, clientY: number) => {
-    if (!image.url || isPipetteActive) return;
+    if (!image.url) return;
+
+    if (isCropping && cropHandleRef.current) {
+        const dx = ((clientX - dragStartRef.current.x) / (image.width * scale)) * 100;
+        const dy = ((clientY - dragStartRef.current.y) / (image.height * scale)) * 100;
+        
+        setCropArea(prev => {
+            const next = { ...prev };
+            if (cropHandleRef.current === 'tl') {
+                next.x = Math.max(0, Math.min(prev.x + prev.width - 5, prev.x + dx));
+                next.y = Math.max(0, Math.min(prev.y + prev.height - 5, prev.y + dy));
+                next.width = prev.width - (next.x - prev.x);
+                next.height = prev.height - (next.y - prev.y);
+            } else if (cropHandleRef.current === 'br') {
+                next.width = Math.max(5, Math.min(100 - prev.x, prev.width + dx));
+                next.height = Math.max(5, Math.min(100 - prev.y, prev.height + dy));
+            } else if (cropHandleRef.current === 'tr') {
+                next.y = Math.max(0, Math.min(prev.y + prev.height - 5, prev.y + dy));
+                next.width = Math.max(5, Math.min(100 - prev.x, prev.width + dx));
+                next.height = prev.height - (next.y - prev.y);
+            } else if (cropHandleRef.current === 'bl') {
+                next.x = Math.max(0, Math.min(prev.x + prev.width - 5, prev.x + dx));
+                next.width = prev.width - (next.x - prev.x);
+                next.height = Math.max(5, Math.min(100 - prev.y, prev.height + dy));
+            }
+            return next;
+        });
+        dragStartRef.current = { x: clientX, y: clientY };
+        return;
+    }
+
+    if (isPipetteActive) return;
+    
     const dx = clientX - dragStartRef.current.x;
     const dy = clientY - dragStartRef.current.y;
     
@@ -152,14 +232,15 @@ const App: React.FC = () => {
   };
 
   const handleEnd = () => {
-    if (!isDragging && image.url && !isPipetteActive) {
+    cropHandleRef.current = null;
+    if (!isDragging && image.url && !isPipetteActive && !isCropping) {
       toggleVisibility();
     }
     setIsDragging(false);
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (!image.url) return;
+    if (!image.url || isCropping) return;
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     const newScale = Math.min(Math.max(0.1, scale * delta), 20);
     setScale(newScale);
@@ -175,19 +256,25 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleGlobalMove = (e: MouseEvent | TouchEvent) => {
-      if (!paletteDragStartRef.current) return;
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-      setPalette(prev => ({
-        ...prev,
-        position: {
-          x: clientX - paletteDragStartRef.current!.x,
-          y: clientY - paletteDragStartRef.current!.y
-        }
-      }));
+      if (paletteDragStartRef.current) {
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        setPalette(prev => ({
+          ...prev,
+          position: {
+            x: clientX - paletteDragStartRef.current!.x,
+            y: clientY - paletteDragStartRef.current!.y
+          }
+        }));
+      } else if (cropHandleRef.current) {
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        handleMove(clientX, clientY);
+      }
     };
     const handleGlobalEnd = () => {
       paletteDragStartRef.current = null;
+      cropHandleRef.current = null;
     };
     window.addEventListener('mousemove', handleGlobalMove);
     window.addEventListener('mouseup', handleGlobalEnd);
@@ -199,7 +286,7 @@ const App: React.FC = () => {
       window.removeEventListener('touchmove', handleGlobalMove);
       window.removeEventListener('touchend', handleGlobalEnd);
     };
-  }, []);
+  }, [palette.position, isCropping, scale, image.width, image.height]);
 
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-white relative touch-none select-none">
@@ -208,35 +295,55 @@ const App: React.FC = () => {
           <Layers className="text-blue-500 w-6 h-6" />
           <h1 className="text-lg font-bold tracking-tight">ArtGrid</h1>
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => setPalette(p => ({ ...p, isVisible: !p.isVisible }))}
-            className={`p-2 rounded-full transition-all active:scale-95 border ${palette.isVisible ? 'bg-blue-600 border-blue-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
-            title="Палитра цветов"
-          >
-            <Palette size={20} />
-          </button>
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-blue-900/20"
-          >
-            <Upload size={18} />
-            <span className="hidden sm:inline">Загрузить</span>
-          </button>
-        </div>
+        
+        {isCropping ? (
+            <div className="flex gap-2">
+                <button 
+                    onClick={() => setIsCropping(false)}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95"
+                >
+                    <CloseIcon size={18} />
+                    <span>Отмена</span>
+                </button>
+                <button 
+                    onClick={handleApplyCrop}
+                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-900/20"
+                >
+                    <Check size={18} />
+                    <span>Применить</span>
+                </button>
+            </div>
+        ) : (
+            <div className="flex gap-2">
+                <button 
+                    onClick={() => setPalette(p => ({ ...p, isVisible: !p.isVisible }))}
+                    className={`p-2 rounded-full transition-all active:scale-95 border ${palette.isVisible ? 'bg-blue-600 border-blue-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
+                    title="Палитра цветов"
+                >
+                    <Palette size={20} />
+                </button>
+                <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-blue-900/20"
+                >
+                    <Upload size={18} />
+                    <span className="hidden sm:inline">Загрузить</span>
+                </button>
+            </div>
+        )}
         <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
       </header>
 
       <main 
         ref={containerRef}
         onWheel={handleWheel}
-        onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+        onMouseDown={(e) => handleStart(e.clientX, e.clientY, e.target)}
         onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
         onMouseUp={handleEnd}
-        onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+        onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY, e.target)}
         onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
         onTouchEnd={handleEnd}
-        className={`flex-1 relative overflow-hidden flex items-center justify-center p-4 ${isPipetteActive ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
+        className={`flex-1 relative overflow-hidden flex items-center justify-center p-4 ${isPipetteActive ? 'cursor-crosshair' : (isCropping ? 'cursor-default' : 'cursor-grab active:cursor-grabbing')}`}
       >
         {!image.url ? (
           <div className="text-center space-y-4 max-w-xs animate-in fade-in slide-in-from-bottom-4 duration-700 pointer-events-none">
@@ -245,7 +352,7 @@ const App: React.FC = () => {
             </div>
             <h2 className="text-xl font-semibold">Начните работу</h2>
             <p className="text-slate-400 text-sm leading-relaxed text-balance">
-              Загрузите изображение, чтобы наложить сетку и использовать пипетку для анализа цветов.
+              Загрузите изображение, чтобы наложить сетку, кадрировать и анализировать цвета.
             </p>
             <button 
               onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
@@ -262,7 +369,48 @@ const App: React.FC = () => {
           >
             <div className="relative shadow-2xl rounded-sm overflow-hidden border border-slate-800">
               <img src={image.url} alt="Workspace" draggable={false} className="max-w-[80vw] max-h-[75vh] object-contain block pointer-events-none" />
-              <GridOverlay settings={settings} imageWidth={image.width} imageHeight={image.height} />
+              
+              {!isCropping && <GridOverlay settings={settings} imageWidth={image.width} imageHeight={image.height} />}
+              
+              {isCropping && (
+                  <div className="absolute inset-0 z-50">
+                      {/* Dark overlay for outside area */}
+                      <div className="absolute inset-0 bg-black/60" style={{ 
+                          clipPath: `polygon(
+                            0% 0%, 0% 100%, 
+                            ${cropArea.x}% 100%, 
+                            ${cropArea.x}% ${cropArea.y}%, 
+                            ${cropArea.x + cropArea.width}% ${cropArea.y}%, 
+                            ${cropArea.x + cropArea.width}% ${cropArea.y + cropArea.height}%, 
+                            ${cropArea.x}% ${cropArea.y + cropArea.height}%, 
+                            ${cropArea.x}% 100%, 100% 100%, 100% 0%)`
+                      }} />
+                      
+                      {/* Crop Window */}
+                      <div 
+                        className="absolute border-2 border-white/80 shadow-[0_0_0_1px_rgba(0,0,0,0.5)] cursor-move"
+                        style={{ 
+                            left: `${cropArea.x}%`, 
+                            top: `${cropArea.y}%`, 
+                            width: `${cropArea.width}%`, 
+                            height: `${cropArea.height}%` 
+                        }}
+                      >
+                          {/* Corner Handles */}
+                          <div data-handle="tl" className="absolute -left-2 -top-2 w-5 h-5 bg-white border border-slate-900 rounded-sm cursor-nw-resize" />
+                          <div data-handle="tr" className="absolute -right-2 -top-2 w-5 h-5 bg-white border border-slate-900 rounded-sm cursor-ne-resize" />
+                          <div data-handle="bl" className="absolute -left-2 -bottom-2 w-5 h-5 bg-white border border-slate-900 rounded-sm cursor-sw-resize" />
+                          <div data-handle="br" className="absolute -right-2 -bottom-2 w-5 h-5 bg-white border border-slate-900 rounded-sm cursor-se-resize" />
+                          
+                          {/* Grid preview in crop */}
+                          <div className="absolute inset-0 opacity-20 pointer-events-none grid grid-cols-3 grid-rows-3 border-white/20">
+                             <div className="border border-white/30" /><div className="border border-white/30" /><div className="border border-white/30" />
+                             <div className="border border-white/30" /><div className="border border-white/30" /><div className="border border-white/30" />
+                             <div className="border border-white/30" /><div className="border border-white/30" /><div className="border border-white/30" />
+                          </div>
+                      </div>
+                  </div>
+              )}
             </div>
           </div>
         )}
@@ -271,7 +419,7 @@ const App: React.FC = () => {
            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full text-[10px] uppercase tracking-widest text-slate-400 pointer-events-none z-10 flex items-center gap-3">
             <span>{Math.round(scale * 100)}%</span>
             <span className="w-1 h-1 bg-slate-600 rounded-full" />
-            <span>{isPipetteActive ? 'Режим пипетки' : 'Навигация'}</span>
+            <span>{isPipetteActive ? 'Пипетка' : (isCropping ? 'Кадрирование' : 'Навигация')}</span>
           </div>
         )}
       </main>
@@ -351,7 +499,7 @@ const App: React.FC = () => {
                 </div>
 
                 <button 
-                  onClick={() => setIsPipetteActive(!isPipetteActive)}
+                  onClick={() => { setIsPipetteActive(!isPipetteActive); if (!isPipetteActive) setIsCropping(false); }}
                   className={`w-full py-2 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all ${isPipetteActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'bg-slate-800 text-slate-400'}`}
                 >
                   <Pipette size={16} />
@@ -364,7 +512,7 @@ const App: React.FC = () => {
       )}
 
       {/* Floating Settings Panel */}
-      {image.url && (
+      {image.url && !isCropping && (
         <div 
           className={`fixed right-6 bottom-6 z-30 transition-all duration-300 ease-in-out ${isControlsMinimized ? 'w-12 h-12' : 'w-[calc(100vw-3rem)] sm:w-80 h-auto'}`}
           onClick={(e) => e.stopPropagation()}
@@ -386,8 +534,7 @@ const App: React.FC = () => {
               <div className="p-5 space-y-5 overflow-y-auto max-h-[65vh]">
                 <div className="space-y-3">
                   <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    <span>Увеличение</span>
-                    <span className="text-blue-400">{Math.round(scale * 100)}%</span>
+                    <span>Вид</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={() => setScale(s => Math.max(0.1, s - 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomOut size={18} /></button>
@@ -396,7 +543,13 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center gap-2">
+                <div className="flex flex-wrap gap-2">
+                   <button 
+                    onClick={() => { setIsCropping(true); setIsPipetteActive(false); setCropArea({x: 10, y: 10, width: 80, height: 80}); }} 
+                    className="flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border text-slate-300 bg-slate-800 border-slate-700"
+                  >
+                    <Crop size={14} /><span>ОБРЕЗАТЬ</span>
+                  </button>
                    <button onClick={() => setSettings(s => ({ ...s, isSquare: !s.isSquare }))} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isSquare ? 'text-blue-400 bg-blue-400/10 border-blue-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
                     <Square size={14} /><span>КВАДРАТ</span>
                   </button>
