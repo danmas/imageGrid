@@ -82,7 +82,7 @@ const App: React.FC = () => {
   const [isPipetteActive, setIsPipetteActive] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
   const [cropArea, setCropArea] = useState<CropArea>({ x: 0, y: 0, width: 100, height: 100 });
-  const [adjustments, setAdjustments] = useState<ImageAdjustments>({ shadows: 0, highlights: 0 });
+  const [adjustments, setAdjustments] = useState<ImageAdjustments>({ shadows: 0, highlights: 0, brightness: 0 });
   
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -150,11 +150,15 @@ const App: React.FC = () => {
   const filterTableValues = useMemo(() => {
     const shadowVal = adjustments.shadows / 100;
     const highlightVal = adjustments.highlights / 100;
+    const brightVal = adjustments.brightness / 100;
     
     const points = [];
     for (let i = 0; i <= 20; i++) {
         let x = i / 20;
         let y = x;
+        
+        y += brightVal * 0.4; // Linear offset for brightness
+        
         if (x <= 0.5) {
             y += Math.sin(x * Math.PI * 2) * shadowVal * 0.25;
         } else {
@@ -163,20 +167,24 @@ const App: React.FC = () => {
         points.push(Math.max(0, Math.min(1, y)).toFixed(4));
     }
     return points.join(' ');
-  }, [adjustments.shadows, adjustments.highlights]);
+  }, [adjustments.shadows, adjustments.highlights, adjustments.brightness]);
 
   const applyCurve = useCallback((val: number) => {
     const shadowVal = adjustments.shadows / 100;
     const highlightVal = adjustments.highlights / 100;
+    const brightVal = adjustments.brightness / 100;
     let x = val / 255;
     let y = x;
+    
+    y += brightVal * 0.4;
+    
     if (x <= 0.5) {
         y += Math.sin(x * Math.PI * 2) * shadowVal * 0.25;
     } else {
         y += Math.sin((x - 0.5) * Math.PI * 2) * highlightVal * 0.25;
     }
     return Math.max(0, Math.min(255, Math.round(y * 255)));
-  }, [adjustments.shadows, adjustments.highlights]);
+  }, [adjustments.shadows, adjustments.highlights, adjustments.brightness]);
 
   const sampleColorAt = (clientX: number, clientY: number) => {
     if (!offscreenCanvasRef.current || !image.url || !containerRef.current) return;
@@ -363,7 +371,7 @@ const App: React.FC = () => {
     <div className="flex flex-col h-full bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-white relative touch-none select-none">
       {/* Global SVG Filters */}
       <svg width="0" height="0" className="absolute pointer-events-none" style={{ position: 'absolute', width: 0, height: 0, visibility: 'hidden' }}>
-        <filter id={`shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights}`} colorInterpolationFilters="sRGB">
+        <filter id={`shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights}-${adjustments.brightness}`} colorInterpolationFilters="sRGB">
           <feComponentTransfer>
             <feFuncR type="table" tableValues={filterTableValues} />
             <feFuncG type="table" tableValues={filterTableValues} />
@@ -455,7 +463,7 @@ const App: React.FC = () => {
                 alt="Workspace" 
                 draggable={false} 
                 className="max-w-[80vw] max-h-[75vh] object-contain block pointer-events-none" 
-                style={{ filter: (adjustments.shadows !== 0 || adjustments.highlights !== 0) ? `url(#shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights})` : 'none' }}
+                style={{ filter: (adjustments.shadows !== 0 || adjustments.highlights !== 0 || adjustments.brightness !== 0) ? `url(#shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights}-${adjustments.brightness})` : 'none' }}
               />
               
               {!isCropping && <GridOverlay settings={settings} imageWidth={image.width} imageHeight={image.height} />}
@@ -622,6 +630,11 @@ const App: React.FC = () => {
                   <button onClick={() => setIsLightMinimized(true)} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400"><ChevronDown size={18} /></button>
                 </div>
                 <div className="p-5 space-y-5">
+                  <SliderWithArrows 
+                    label="Яркость" 
+                    value={adjustments.brightness} 
+                    onChange={(v: number) => setAdjustments(s => ({...s, brightness: v}))} 
+                  />
                   <SliderWithArrows 
                     label="Тени" 
                     value={adjustments.shadows} 

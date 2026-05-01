@@ -32,4 +32,5 @@ export interface CropArea {
 export interface ImageAdjustments {
   shadows: number;
   highlights: number;
+  brightness: number;
 }
