@@ -6,6 +6,8 @@ export interface GridSettings {
   subDivisions: number;
   isSquare: boolean;
   color: string;
+  gridOffsetX: number; // Horizontal grid offset in % of image width (-100..100)
+  gridOffsetY: number; // Vertical grid offset in % of image height (-100..100)
 }
 
 export interface PaletteSettings {

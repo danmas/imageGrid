@@ -69,7 +69,9 @@ const App: React.FC = () => {
     vDivisions: 4,
     subDivisions: 4,
     isSquare: false,
-    color: '#ffffff'
+    color: '#ffffff',
+    gridOffsetX: 0,
+    gridOffsetY: 0
   });
   
   const [palette, setPalette] = useState<PaletteSettings>({
@@ -98,6 +100,9 @@ const App: React.FC = () => {
   const lastPositionRef = useRef({ x: 0, y: 0 });
   const paletteDragStartRef = useRef<{ x: number, y: number } | null>(null);
   const cropHandleRef = useRef<string | null>(null);
+  const isGridOffsetDragging = useRef(false);
+  const gridDragStartClientRef = useRef({ x: 0, y: 0 });
+  const gridOffsetStartRef = useRef({ x: 0, y: 0 });
 
   const updateOffscreenCanvas = (img: HTMLImageElement) => {
     const canvas = document.createElement('canvas');
@@ -265,29 +270,39 @@ const App: React.FC = () => {
     }
 
     if (settings.isVisible) {
-      const { hDivisions, vDivisions, subDivisions, color } = settings;
+      const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY } = settings;
       const totalH = hDivisions * subDivisions;
       const totalV = vDivisions * subDivisions;
 
       const isCenter = (index: number, total: number) => Math.abs((index / total) - 0.5) < 0.001;
       const isMain = (index: number) => index % subDivisions === 0;
 
+      const normOffsetX = ((gridOffsetX % 100) + 100) % 100;
+      const normOffsetY = ((gridOffsetY % 100) + 100) % 100;
+
       ctx.strokeStyle = color;
       
-      for (let i = 1; i < totalH; i++) {
-        const y = (i / totalH) * canvas.height;
-        ctx.lineWidth = isCenter(i, totalH) ? 2.5 : (isMain(i) ? 1.2 : 0.4);
-        ctx.globalAlpha = isCenter(i, totalH) ? 0.9 : (isMain(i) ? 0.7 : 0.3);
+      // Draw extended range for wrap-around
+      for (let i = -totalH; i < totalH * 2; i++) {
+        if (i === 0) continue;
+        const rawY = (i / totalH) * canvas.height;
+        const y = (rawY + (normOffsetY / 100) * canvas.height) % canvas.height;
+        const absI = Math.abs(i);
+        ctx.lineWidth = isCenter(absI, totalH) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
+        ctx.globalAlpha = isCenter(absI, totalH) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
       }
 
-      for (let i = 1; i < totalV; i++) {
-        const x = (i / totalV) * canvas.width;
-        ctx.lineWidth = isCenter(i, totalV) ? 2.5 : (isMain(i) ? 1.2 : 0.4);
-        ctx.globalAlpha = isCenter(i, totalV) ? 0.9 : (isMain(i) ? 0.7 : 0.3);
+      for (let i = -totalV; i < totalV * 2; i++) {
+        if (i === 0) continue;
+        const rawX = (i / totalV) * canvas.width;
+        const x = (rawX + (normOffsetX / 100) * canvas.width) % canvas.width;
+        const absI = Math.abs(i);
+        ctx.lineWidth = isCenter(absI, totalV) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
+        ctx.globalAlpha = isCenter(absI, totalV) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, canvas.height);
@@ -306,8 +321,16 @@ const App: React.FC = () => {
     link.click();
   }, [image.width, image.height, image.url, settings, adjustments, applyCurve]);
 
-  const handleStart = (clientX: number, clientY: number, target?: EventTarget) => {
+  const handleStart = (clientX: number, clientY: number, target?: EventTarget, ctrlKey?: boolean) => {
     if (!image.url) return;
+
+    // Ctrl + LMB: grid offset dragging
+    if (ctrlKey) {
+      isGridOffsetDragging.current = true;
+      gridDragStartClientRef.current = { x: clientX, y: clientY };
+      gridOffsetStartRef.current = { x: settings.gridOffsetX, y: settings.gridOffsetY };
+      return;
+    }
     
     if (isCropping) {
         const handle = (target as HTMLElement)?.dataset?.handle;
@@ -331,6 +354,20 @@ const App: React.FC = () => {
 
   const handleMove = (clientX: number, clientY: number) => {
     if (!image.url) return;
+
+    // Grid offset dragging (Ctrl+LMB)
+    if (isGridOffsetDragging.current) {
+      const dx = clientX - gridDragStartClientRef.current.x;
+      const dy = clientY - gridDragStartClientRef.current.y;
+      const deltaXPercent = (dx / scale) / image.width * 100;
+      const deltaYPercent = (dy / scale) / image.height * 100;
+      setSettings(s => ({
+        ...s,
+        gridOffsetX: gridOffsetStartRef.current.x + deltaXPercent,
+        gridOffsetY: gridOffsetStartRef.current.y + deltaYPercent
+      }));
+      return;
+    }
 
     if (isCropping && cropHandleRef.current) {
         const dx = ((clientX - dragStartRef.current.x) / (image.width * scale)) * 100;
@@ -376,6 +413,10 @@ const App: React.FC = () => {
   };
 
   const handleEnd = () => {
+    if (isGridOffsetDragging.current) {
+      isGridOffsetDragging.current = false;
+      return;
+    }
     cropHandleRef.current = null;
     if (!isDragging && image.url && !isPipetteActive && !isCropping) {
       toggleVisibility();
@@ -400,6 +441,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleGlobalMove = (e: MouseEvent | TouchEvent) => {
+      if (isGridOffsetDragging.current) {
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        handleMove(clientX, clientY);
+        return;
+      }
       if (paletteDragStartRef.current) {
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -417,6 +464,9 @@ const App: React.FC = () => {
       }
     };
     const handleGlobalEnd = () => {
+      if (isGridOffsetDragging.current) {
+        isGridOffsetDragging.current = false;
+      }
       paletteDragStartRef.current = null;
       cropHandleRef.current = null;
     };
@@ -502,7 +552,7 @@ const App: React.FC = () => {
       <main 
         ref={containerRef}
         onWheel={handleWheel}
-        onMouseDown={(e) => handleStart(e.clientX, e.clientY, e.target)}
+        onMouseDown={(e) => handleStart(e.clientX, e.clientY, e.target, e.ctrlKey)}
         onMouseMove={(e) => e.buttons === 1 && handleMove(e.clientX, e.clientY)}
         onMouseUp={handleEnd}
         onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY, e.target)}
@@ -591,6 +641,22 @@ const App: React.FC = () => {
             <span>{Math.round(scale * 100)}%</span>
             <span className="w-1 h-1 bg-slate-600 rounded-full" />
             <span>{isPipetteActive ? 'Пипетка' : (isCropping ? 'Кадрирование' : 'Навигация')}</span>
+            {(settings.gridOffsetX !== 0 || settings.gridOffsetY !== 0) && (
+              <>
+                <span className="w-1 h-1 bg-slate-600 rounded-full" />
+                <span className="text-blue-400">
+                  Сетка: {settings.gridOffsetX.toFixed(1)},{settings.gridOffsetY.toFixed(1)}
+                </span>
+                <button
+                  onClick={() => setSettings(s => ({...s, gridOffsetX: 0, gridOffsetY: 0}))}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="pointer-events-auto text-blue-400 hover:text-blue-300 hover:bg-slate-700/50 rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold leading-none"
+                  title="Сбросить сдвиг сетки (0,0)"
+                >
+                  ×
+                </button>
+              </>
+            )}
           </div>
         )}
       </main>
@@ -787,6 +853,60 @@ const App: React.FC = () => {
                     <div className="space-y-2">
                       <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Детализация</span><span className="text-blue-400">{settings.subDivisions}</span></div>
                       <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                    </div>
+                    
+                    {/* Grid Offset Controls */}
+                    <div className="space-y-3 pt-2 border-t border-slate-800">
+                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                        <span>Сдвиг сетки</span>
+                        <button 
+                          onClick={() => setSettings(s => ({...s, gridOffsetX: 0, gridOffsetY: 0}))}
+                          className="text-blue-400 hover:text-blue-300 transition-colors"
+                          title="Сбросить сдвиг"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {/* Row 1: empty, up, empty */}
+                        <div />
+                        <button 
+                          onClick={() => setSettings(s => ({...s, gridOffsetY: s.gridOffsetY - 5}))}
+                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                          title="Сдвинуть вверх"
+                        >
+                          <ChevronDown size={16} className="rotate-180" />
+                        </button>
+                        <div />
+                        {/* Row 2: left, reset, right */}
+                        <button 
+                          onClick={() => setSettings(s => ({...s, gridOffsetX: s.gridOffsetX - 5}))}
+                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                          title="Сдвинуть влево"
+                        >
+                          <ChevronDown size={16} className="rotate-90" />
+                        </button>
+                        <div className="flex items-center justify-center text-[10px] text-slate-500 font-mono">
+                          <span>{settings.gridOffsetX},{settings.gridOffsetY}</span>
+                        </div>
+                        <button 
+                          onClick={() => setSettings(s => ({...s, gridOffsetX: s.gridOffsetX + 5}))}
+                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                          title="Сдвинуть вправо"
+                        >
+                          <ChevronDown size={16} className="-rotate-90" />
+                        </button>
+                        {/* Row 3: empty, down, empty */}
+                        <div />
+                        <button 
+                          onClick={() => setSettings(s => ({...s, gridOffsetY: s.gridOffsetY + 5}))}
+                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                          title="Сдвинуть вниз"
+                        >
+                          <ChevronDown size={16} />
+                        </button>
+                        <div />
+                      </div>
                     </div>
                   </div>
                   

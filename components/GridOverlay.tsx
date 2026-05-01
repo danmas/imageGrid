@@ -11,7 +11,7 @@ interface GridOverlayProps {
 export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, imageHeight }) => {
   if (!settings.isVisible || imageWidth === 0 || imageHeight === 0) return null;
 
-  const { hDivisions, vDivisions, subDivisions, color } = settings;
+  const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY } = settings;
   const horizontalLines = [];
   const verticalLines = [];
 
@@ -25,11 +25,18 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
 
   const isMain = (index: number) => index % subDivisions === 0;
 
+  // Normalize offset to 0..100 range for wrap-around calculation
+  const normOffsetX = ((gridOffsetX % 100) + 100) % 100;
+  const normOffsetY = ((gridOffsetY % 100) + 100) % 100;
+
+  // Draw extended range of lines to cover offset wrapping (3 full cycles)
   // Horizontal Lines (Rows)
-  for (let i = 1; i < totalH; i++) {
-    const y = (i / totalH) * 100;
-    const isMainLine = isMain(i);
-    const isCenterLine = isCenter(i, totalH);
+  for (let i = -totalH; i < totalH * 2; i++) {
+    if (i === 0) continue; // skip boundary at 0
+    const rawY = (i / totalH) * 100;
+    const y = (rawY + normOffsetY) % 100;
+    const isMainLine = isMain(Math.abs(i));
+    const isCenterLine = isCenter(Math.abs(i), totalH);
     
     horizontalLines.push(
       <line
@@ -46,10 +53,12 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
   }
 
   // Vertical Lines (Columns)
-  for (let i = 1; i < totalV; i++) {
-    const x = (i / totalV) * 100;
-    const isMainLine = isMain(i);
-    const isCenterLine = isCenter(i, totalV);
+  for (let i = -totalV; i < totalV * 2; i++) {
+    if (i === 0) continue;
+    const rawX = (i / totalV) * 100;
+    const x = (rawX + normOffsetX) % 100;
+    const isMainLine = isMain(Math.abs(i));
+    const isCenterLine = isCenter(Math.abs(i), totalV);
 
     verticalLines.push(
       <line
@@ -70,6 +79,7 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
       className="absolute top-0 left-0 w-full h-full pointer-events-none"
       viewBox={`0 0 ${imageWidth} ${imageHeight}`}
       preserveAspectRatio="none"
+      style={{ overflow: 'hidden' }}
     >
       {/* Border */}
       <rect 
