@@ -28,17 +28,18 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
   // Safe modulo (handles negative)
   const mod = (n: number, m: number) => ((n % m) + m) % m;
 
-  // Normalize offset to 0..100 range for wrap-around calculation
-  const normOffsetX = mod(gridOffsetX, 100);
-  const normOffsetY = mod(gridOffsetY, 100);
+  // Normalize offset to [-50, 50) so that 50+normOffset stays in [0, 100) (circle always visible)
+  const normOffsetX = mod(gridOffsetX + 50, 100) - 50;
+  const normOffsetY = mod(gridOffsetY + 50, 100) - 50;
 
-  // Horizontal Lines — direct spacing, no modulo wrap
+  // Horizontal Lines — direct spacing, anchor at image center (50%)
   const spacingY = (100 * gridScaleY) / totalH;
-  const startIY = Math.floor(-normOffsetY / spacingY) - 1;
-  const endIY = Math.ceil((100 - normOffsetY) / spacingY) + 1;
+  const originY = 50 + normOffsetY - (totalH / 2) * spacingY;
+  const startIY = Math.floor(-originY / spacingY) - 1;
+  const endIY = Math.ceil((100 - originY) / spacingY) + 1;
 
   for (let i = startIY; i <= endIY; i++) {
-    const y = i * spacingY + normOffsetY;
+    const y = i * spacingY + originY;
     if (y <= 0.001 || y >= 99.999) continue; // skip border positions
     const absI = Math.abs(i);
     const isMainLine = isMain(absI);
@@ -58,13 +59,14 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
     );
   }
 
-  // Vertical Lines — direct spacing, no modulo wrap
+  // Vertical Lines — direct spacing, anchor at image center (50%)
   const spacingX = (100 * gridScaleX) / totalV;
-  const startIX = Math.floor(-normOffsetX / spacingX) - 1;
-  const endIX = Math.ceil((100 - normOffsetX) / spacingX) + 1;
+  const originX = 50 + normOffsetX - (totalV / 2) * spacingX;
+  const startIX = Math.floor(-originX / spacingX) - 1;
+  const endIX = Math.ceil((100 - originX) / spacingX) + 1;
 
   for (let i = startIX; i <= endIX; i++) {
-    const x = i * spacingX + normOffsetX;
+    const x = i * spacingX + originX;
     if (x <= 0.001 || x >= 99.999) continue; // skip border positions
     const absI = Math.abs(i);
     const isMainLine = isMain(absI);
@@ -104,6 +106,16 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
       />
       {horizontalLines}
       {verticalLines}
+      {/* Grid center marker (0,0) */}
+      <circle
+        cx={`${50 + normOffsetX}%`}
+        cy={`${50 + normOffsetY}%`}
+        r={Math.min(imageWidth, imageHeight) * 0.012}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeOpacity="0.9"
+      />
     </svg>
   );
 };

@@ -289,20 +289,21 @@ const App: React.FC = () => {
       const isMain = (index: number) => index % subDivisions === 0;
 
       const mod = (n: number, m: number) => ((n % m) + m) % m;
-      const normOffsetX = mod(gridOffsetX, 100);
-      const normOffsetY = mod(gridOffsetY, 100);
+      // Normalize to [-50, 50) for consistent anchor behavior
+      const normOffsetX = mod(gridOffsetX + 50, 100) - 50;
+      const normOffsetY = mod(gridOffsetY + 50, 100) - 50;
 
 
       ctx.strokeStyle = color;
 
-      // Horizontal lines — direct spacing, no modulo wrap
+      // Horizontal lines — direct spacing, anchor at image center
       const spacingYpx = (canvas.height * gridScaleY) / totalH;
-      const offsetYpx = (normOffsetY / 100) * canvas.height;
-      const startIY = Math.floor(-offsetYpx / spacingYpx) - 1;
-      const endIY = Math.ceil((canvas.height - offsetYpx) / spacingYpx) + 1;
+      const originYpx = canvas.height * 0.5 + (normOffsetY / 100) * canvas.height - (totalH / 2) * spacingYpx;
+      const startIY = Math.floor(-originYpx / spacingYpx) - 1;
+      const endIY = Math.ceil((canvas.height - originYpx) / spacingYpx) + 1;
 
       for (let i = startIY; i <= endIY; i++) {
-        const y = i * spacingYpx + offsetYpx;
+        const y = i * spacingYpx + originYpx;
         if (y <= 0 || y >= canvas.height) continue;
         const absI = Math.abs(i);
         ctx.lineWidth = isCenter(absI, totalH) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
@@ -313,14 +314,14 @@ const App: React.FC = () => {
         ctx.stroke();
       }
 
-      // Vertical lines — direct spacing, no modulo wrap
+      // Vertical lines — direct spacing, anchor at image center
       const spacingXpx = (canvas.width * gridScaleX) / totalV;
-      const offsetXpx = (normOffsetX / 100) * canvas.width;
-      const startIX = Math.floor(-offsetXpx / spacingXpx) - 1;
-      const endIX = Math.ceil((canvas.width - offsetXpx) / spacingXpx) + 1;
+      const originXpx = canvas.width * 0.5 + (normOffsetX / 100) * canvas.width - (totalV / 2) * spacingXpx;
+      const startIX = Math.floor(-originXpx / spacingXpx) - 1;
+      const endIX = Math.ceil((canvas.width - originXpx) / spacingXpx) + 1;
 
       for (let i = startIX; i <= endIX; i++) {
-        const x = i * spacingXpx + offsetXpx;
+        const x = i * spacingXpx + originXpx;
         if (x <= 0 || x >= canvas.width) continue;
         const absI = Math.abs(i);
         ctx.lineWidth = isCenter(absI, totalV) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
@@ -663,16 +664,20 @@ const App: React.FC = () => {
             <span>{Math.round(scale * 100)}%</span>
             <span className="w-1 h-1 bg-slate-600 rounded-full" />
             <span>{isPipetteActive ? 'Пипетка' : (isCropping ? 'Кадрирование' : 'Навигация')}</span>
-            {(settings.gridOffsetX !== 0 || settings.gridOffsetY !== 0) && (
+            {settings.isVisible && (
               <>
                 <span className="w-1 h-1 bg-slate-600 rounded-full" />
-                <span className="text-blue-400">
-                  Сетка: {settings.gridOffsetX.toFixed(1)},{settings.gridOffsetY.toFixed(1)}
+                <span className={(settings.gridOffsetX !== 0 || settings.gridOffsetY !== 0) ? "text-blue-400" : "text-slate-500"}>
+                  {settings.gridOffsetX.toFixed(1)},{settings.gridOffsetY.toFixed(1)}
                 </span>
                 <button
                   onClick={() => setSettings(s => ({...s, gridOffsetX: 0, gridOffsetY: 0}))}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="pointer-events-auto text-blue-400 hover:text-blue-300 hover:bg-slate-700/50 rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold leading-none"
+                  className={`pointer-events-auto rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold leading-none transition-colors ${
+                    (settings.gridOffsetX !== 0 || settings.gridOffsetY !== 0)
+                      ? 'text-blue-400 hover:text-blue-300 hover:bg-slate-700/50'
+                      : 'text-slate-600 cursor-default'
+                  }`}
                   title="Сбросить сдвиг сетки (0,0)"
                 >
                   ×
