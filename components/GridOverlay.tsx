@@ -11,7 +11,7 @@ interface GridOverlayProps {
 export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, imageHeight }) => {
   if (!settings.isVisible || imageWidth === 0 || imageHeight === 0) return null;
 
-  const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY } = settings;
+  const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY, gridScaleX, gridScaleY } = settings;
   const horizontalLines = [];
   const verticalLines = [];
 
@@ -25,22 +25,32 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
 
   const isMain = (index: number) => index % subDivisions === 0;
 
-  // Normalize offset to 0..100 range for wrap-around calculation
-  const normOffsetX = ((gridOffsetX % 100) + 100) % 100;
-  const normOffsetY = ((gridOffsetY % 100) + 100) % 100;
+  // Safe modulo (handles negative)
+  const mod = (n: number, m: number) => ((n % m) + m) % m;
 
-  // Draw extended range of lines to cover offset wrapping (3 full cycles)
-  // Horizontal Lines (Rows)
-  for (let i = -totalH; i < totalH * 2; i++) {
+  // Normalize offset to 0..100 range for wrap-around calculation
+  const normOffsetX = mod(gridOffsetX, 100);
+  const normOffsetY = mod(gridOffsetY, 100);
+
+  // Range must cover viewport even when scale shrinks (denser lines)
+  const rangeY = Math.max(totalH * 2, Math.ceil(totalH / Math.max(0.1, gridScaleY)) + 2);
+  const rangeX = Math.max(totalV * 2, Math.ceil(totalV / Math.max(0.1, gridScaleX)) + 2);
+
+  // Horizontal Lines (Rows) — deduplicated by position
+  const seenY = new Set<string>();
+  for (let i = -rangeY; i < rangeY * 2; i++) {
     if (i === 0) continue; // skip boundary at 0
-    const rawY = (i / totalH) * 100;
-    const y = (rawY + normOffsetY) % 100;
+    const rawY = (i / totalH) * 100 * gridScaleY;
+    const y = mod(rawY + normOffsetY, 100);
+    const yKey = y.toFixed(4);
+    if (seenY.has(yKey)) continue;
+    seenY.add(yKey);
     const isMainLine = isMain(Math.abs(i));
     const isCenterLine = isCenter(Math.abs(i), totalH);
     
     horizontalLines.push(
       <line
-        key={`h-${i}`}
+        key={`h-${yKey}`}
         x1="0"
         y1={`${y}%`}
         x2="100%"
@@ -52,17 +62,21 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
     );
   }
 
-  // Vertical Lines (Columns)
-  for (let i = -totalV; i < totalV * 2; i++) {
+  // Vertical Lines (Columns) — deduplicated by position
+  const seenX = new Set<string>();
+  for (let i = -rangeX; i < rangeX * 2; i++) {
     if (i === 0) continue;
-    const rawX = (i / totalV) * 100;
-    const x = (rawX + normOffsetX) % 100;
+    const rawX = (i / totalV) * 100 * gridScaleX;
+    const x = mod(rawX + normOffsetX, 100);
+    const xKey = x.toFixed(4);
+    if (seenX.has(xKey)) continue;
+    seenX.add(xKey);
     const isMainLine = isMain(Math.abs(i));
     const isCenterLine = isCenter(Math.abs(i), totalV);
 
     verticalLines.push(
       <line
-        key={`v-${i}`}
+        key={`v-${xKey}`}
         x1={`${x}%`}
         y1="0"
         x2={`${x}%`}

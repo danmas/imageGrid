@@ -71,7 +71,9 @@ const App: React.FC = () => {
     isSquare: false,
     color: '#ffffff',
     gridOffsetX: 0,
-    gridOffsetY: 0
+    gridOffsetY: 0,
+    gridScaleX: 1,
+    gridScaleY: 1
   });
   
   const [palette, setPalette] = useState<PaletteSettings>({
@@ -147,8 +149,17 @@ const App: React.FC = () => {
     if (settings.isSquare && image.width > 0 && image.height > 0) {
       const aspectRatio = image.height / image.width;
       const newH = Math.round(settings.vDivisions * aspectRatio);
+      const updates: Partial<typeof settings> = {};
       if (newH !== settings.hDivisions) {
-        setSettings(prev => ({ ...prev, hDivisions: Math.max(1, newH) }));
+        updates.hDivisions = Math.max(1, newH);
+      }
+      if (settings.gridScaleX !== settings.gridScaleY) {
+        const avg = +((settings.gridScaleX + settings.gridScaleY) / 2).toFixed(2);
+        updates.gridScaleX = avg;
+        updates.gridScaleY = avg;
+      }
+      if (Object.keys(updates).length > 0) {
+        setSettings(prev => ({ ...prev, ...updates }));
       }
     }
   }, [settings.isSquare, settings.vDivisions, image.width, image.height]);
@@ -270,23 +281,26 @@ const App: React.FC = () => {
     }
 
     if (settings.isVisible) {
-      const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY } = settings;
+      const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY, gridScaleX, gridScaleY } = settings;
       const totalH = hDivisions * subDivisions;
       const totalV = vDivisions * subDivisions;
 
       const isCenter = (index: number, total: number) => Math.abs((index / total) - 0.5) < 0.001;
       const isMain = (index: number) => index % subDivisions === 0;
 
-      const normOffsetX = ((gridOffsetX % 100) + 100) % 100;
-      const normOffsetY = ((gridOffsetY % 100) + 100) % 100;
+      const mod = (n: number, m: number) => ((n % m) + m) % m;
+      const normOffsetX = mod(gridOffsetX, 100);
+      const normOffsetY = mod(gridOffsetY, 100);
+
+      const rangeY = Math.max(totalH * 2, Math.ceil(totalH / Math.max(0.1, gridScaleY)) + 2);
+      const rangeX = Math.max(totalV * 2, Math.ceil(totalV / Math.max(0.1, gridScaleX)) + 2);
 
       ctx.strokeStyle = color;
       
-      // Draw extended range for wrap-around
-      for (let i = -totalH; i < totalH * 2; i++) {
+      for (let i = -rangeY; i < rangeY * 2; i++) {
         if (i === 0) continue;
-        const rawY = (i / totalH) * canvas.height;
-        const y = (rawY + (normOffsetY / 100) * canvas.height) % canvas.height;
+        const rawY = (i / totalH) * canvas.height * gridScaleY;
+        const y = mod(rawY + (normOffsetY / 100) * canvas.height, canvas.height);
         const absI = Math.abs(i);
         ctx.lineWidth = isCenter(absI, totalH) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
         ctx.globalAlpha = isCenter(absI, totalH) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
@@ -296,10 +310,10 @@ const App: React.FC = () => {
         ctx.stroke();
       }
 
-      for (let i = -totalV; i < totalV * 2; i++) {
+      for (let i = -rangeX; i < rangeX * 2; i++) {
         if (i === 0) continue;
-        const rawX = (i / totalV) * canvas.width;
-        const x = (rawX + (normOffsetX / 100) * canvas.width) % canvas.width;
+        const rawX = (i / totalV) * canvas.width * gridScaleX;
+        const x = mod(rawX + (normOffsetX / 100) * canvas.width, canvas.width);
         const absI = Math.abs(i);
         ctx.lineWidth = isCenter(absI, totalV) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
         ctx.globalAlpha = isCenter(absI, totalV) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
@@ -855,55 +869,71 @@ const App: React.FC = () => {
                       <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
                     </div>
                     
-                    {/* Grid Offset Controls */}
+                    {/* Grid Scale Controls */}
                     <div className="space-y-3 pt-2 border-t border-slate-800">
                       <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                        <span>Сдвиг сетки</span>
+                        <span>Масштаб сетки</span>
                         <button 
-                          onClick={() => setSettings(s => ({...s, gridOffsetX: 0, gridOffsetY: 0}))}
+                          onClick={() => setSettings(s => ({...s, gridScaleX: 1, gridScaleY: 1}))}
                           className="text-blue-400 hover:text-blue-300 transition-colors"
-                          title="Сбросить сдвиг"
+                          title="Сбросить масштаб (1×1)"
                         >
                           <RefreshCw size={12} />
                         </button>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
-                        {/* Row 1: empty, up, empty */}
+                        {/* Row 1: empty, Y+, empty */}
                         <div />
                         <button 
-                          onClick={() => setSettings(s => ({...s, gridOffsetY: s.gridOffsetY - 5}))}
+                          onClick={() => setSettings(s => {
+                            const newY = Math.min(5, +(s.gridScaleY + 0.05).toFixed(2));
+                            if (s.isSquare) return {...s, gridScaleX: newY, gridScaleY: newY};
+                            return {...s, gridScaleY: newY};
+                          })}
                           className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Сдвинуть вверх"
+                          title="Увеличить масштаб Y"
                         >
-                          <ChevronDown size={16} className="rotate-180" />
+                          <Plus size={16} />
                         </button>
                         <div />
-                        {/* Row 2: left, reset, right */}
+                        {/* Row 2: X-, center display, X+ */}
                         <button 
-                          onClick={() => setSettings(s => ({...s, gridOffsetX: s.gridOffsetX - 5}))}
+                          onClick={() => setSettings(s => {
+                            const newX = Math.max(0.05, +(s.gridScaleX - 0.05).toFixed(2));
+                            if (s.isSquare) return {...s, gridScaleX: newX, gridScaleY: newX};
+                            return {...s, gridScaleX: newX};
+                          })}
                           className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Сдвинуть влево"
+                          title="Уменьшить масштаб X"
                         >
-                          <ChevronDown size={16} className="rotate-90" />
+                          <Minus size={16} />
                         </button>
                         <div className="flex items-center justify-center text-[10px] text-slate-500 font-mono">
-                          <span>{settings.gridOffsetX},{settings.gridOffsetY}</span>
+                          <span>X:{settings.gridScaleX.toFixed(2)} Y:{settings.gridScaleY.toFixed(2)}</span>
                         </div>
                         <button 
-                          onClick={() => setSettings(s => ({...s, gridOffsetX: s.gridOffsetX + 5}))}
+                          onClick={() => setSettings(s => {
+                            const newX = Math.min(5, +(s.gridScaleX + 0.05).toFixed(2));
+                            if (s.isSquare) return {...s, gridScaleX: newX, gridScaleY: newX};
+                            return {...s, gridScaleX: newX};
+                          })}
                           className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Сдвинуть вправо"
+                          title="Увеличить масштаб X"
                         >
-                          <ChevronDown size={16} className="-rotate-90" />
+                          <Plus size={16} />
                         </button>
-                        {/* Row 3: empty, down, empty */}
+                        {/* Row 3: empty, Y-, empty */}
                         <div />
                         <button 
-                          onClick={() => setSettings(s => ({...s, gridOffsetY: s.gridOffsetY + 5}))}
+                          onClick={() => setSettings(s => {
+                            const newY = Math.max(0.05, +(s.gridScaleY - 0.05).toFixed(2));
+                            if (s.isSquare) return {...s, gridScaleX: newY, gridScaleY: newY};
+                            return {...s, gridScaleY: newY};
+                          })}
                           className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Сдвинуть вниз"
+                          title="Уменьшить масштаб Y"
                         >
-                          <ChevronDown size={16} />
+                          <Minus size={16} />
                         </button>
                         <div />
                       </div>
