@@ -292,15 +292,18 @@ const App: React.FC = () => {
       const normOffsetX = mod(gridOffsetX, 100);
       const normOffsetY = mod(gridOffsetY, 100);
 
-      const rangeY = Math.max(totalH * 2, Math.ceil(totalH / Math.max(0.1, gridScaleY)) + 2);
-      const rangeX = Math.max(totalV * 2, Math.ceil(totalV / Math.max(0.1, gridScaleX)) + 2);
 
       ctx.strokeStyle = color;
-      
-      for (let i = -rangeY; i < rangeY * 2; i++) {
-        if (i === 0) continue;
-        const rawY = (i / totalH) * canvas.height * gridScaleY;
-        const y = mod(rawY + (normOffsetY / 100) * canvas.height, canvas.height);
+
+      // Horizontal lines — direct spacing, no modulo wrap
+      const spacingYpx = (canvas.height * gridScaleY) / totalH;
+      const offsetYpx = (normOffsetY / 100) * canvas.height;
+      const startIY = Math.floor(-offsetYpx / spacingYpx) - 1;
+      const endIY = Math.ceil((canvas.height - offsetYpx) / spacingYpx) + 1;
+
+      for (let i = startIY; i <= endIY; i++) {
+        const y = i * spacingYpx + offsetYpx;
+        if (y <= 0 || y >= canvas.height) continue;
         const absI = Math.abs(i);
         ctx.lineWidth = isCenter(absI, totalH) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
         ctx.globalAlpha = isCenter(absI, totalH) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
@@ -310,10 +313,15 @@ const App: React.FC = () => {
         ctx.stroke();
       }
 
-      for (let i = -rangeX; i < rangeX * 2; i++) {
-        if (i === 0) continue;
-        const rawX = (i / totalV) * canvas.width * gridScaleX;
-        const x = mod(rawX + (normOffsetX / 100) * canvas.width, canvas.width);
+      // Vertical lines — direct spacing, no modulo wrap
+      const spacingXpx = (canvas.width * gridScaleX) / totalV;
+      const offsetXpx = (normOffsetX / 100) * canvas.width;
+      const startIX = Math.floor(-offsetXpx / spacingXpx) - 1;
+      const endIX = Math.ceil((canvas.width - offsetXpx) / spacingXpx) + 1;
+
+      for (let i = startIX; i <= endIX; i++) {
+        const x = i * spacingXpx + offsetXpx;
+        if (x <= 0 || x >= canvas.width) continue;
         const absI = Math.abs(i);
         ctx.lineWidth = isCenter(absI, totalV) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
         ctx.globalAlpha = isCenter(absI, totalV) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);

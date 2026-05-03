@@ -32,25 +32,21 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
   const normOffsetX = mod(gridOffsetX, 100);
   const normOffsetY = mod(gridOffsetY, 100);
 
-  // Range must cover viewport even when scale shrinks (denser lines)
-  const rangeY = Math.max(totalH * 2, Math.ceil(totalH / Math.max(0.1, gridScaleY)) + 2);
-  const rangeX = Math.max(totalV * 2, Math.ceil(totalV / Math.max(0.1, gridScaleX)) + 2);
+  // Horizontal Lines — direct spacing, no modulo wrap
+  const spacingY = (100 * gridScaleY) / totalH;
+  const startIY = Math.floor(-normOffsetY / spacingY) - 1;
+  const endIY = Math.ceil((100 - normOffsetY) / spacingY) + 1;
 
-  // Horizontal Lines (Rows) — deduplicated by position
-  const seenY = new Set<string>();
-  for (let i = -rangeY; i < rangeY * 2; i++) {
-    if (i === 0) continue; // skip boundary at 0
-    const rawY = (i / totalH) * 100 * gridScaleY;
-    const y = mod(rawY + normOffsetY, 100);
-    const yKey = y.toFixed(4);
-    if (seenY.has(yKey)) continue;
-    seenY.add(yKey);
-    const isMainLine = isMain(Math.abs(i));
-    const isCenterLine = isCenter(Math.abs(i), totalH);
-    
+  for (let i = startIY; i <= endIY; i++) {
+    const y = i * spacingY + normOffsetY;
+    if (y <= 0.001 || y >= 99.999) continue; // skip border positions
+    const absI = Math.abs(i);
+    const isMainLine = isMain(absI);
+    const isCenterLine = isCenter(absI, totalH);
+
     horizontalLines.push(
       <line
-        key={`h-${yKey}`}
+        key={`h-${i}`}
         x1="0"
         y1={`${y}%`}
         x2="100%"
@@ -62,21 +58,21 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
     );
   }
 
-  // Vertical Lines (Columns) — deduplicated by position
-  const seenX = new Set<string>();
-  for (let i = -rangeX; i < rangeX * 2; i++) {
-    if (i === 0) continue;
-    const rawX = (i / totalV) * 100 * gridScaleX;
-    const x = mod(rawX + normOffsetX, 100);
-    const xKey = x.toFixed(4);
-    if (seenX.has(xKey)) continue;
-    seenX.add(xKey);
-    const isMainLine = isMain(Math.abs(i));
-    const isCenterLine = isCenter(Math.abs(i), totalV);
+  // Vertical Lines — direct spacing, no modulo wrap
+  const spacingX = (100 * gridScaleX) / totalV;
+  const startIX = Math.floor(-normOffsetX / spacingX) - 1;
+  const endIX = Math.ceil((100 - normOffsetX) / spacingX) + 1;
+
+  for (let i = startIX; i <= endIX; i++) {
+    const x = i * spacingX + normOffsetX;
+    if (x <= 0.001 || x >= 99.999) continue; // skip border positions
+    const absI = Math.abs(i);
+    const isMainLine = isMain(absI);
+    const isCenterLine = isCenter(absI, totalV);
 
     verticalLines.push(
       <line
-        key={`v-${xKey}`}
+        key={`v-${i}`}
         x1={`${x}%`}
         y1="0"
         x2={`${x}%`}
