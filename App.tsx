@@ -449,6 +449,18 @@ const App: React.FC = () => {
 
   const handleWheel = (e: React.WheelEvent) => {
     if (!image.url || isCropping) return;
+
+    // Shift + wheel: change grid scale (both X and Y)
+    if (e.shiftKey) {
+      const step = e.deltaY > 0 ? -0.05 : 0.05;
+      setSettings(s => {
+        const newX = Math.min(5, Math.max(0.05, +(s.gridScaleX + step).toFixed(2)));
+        const newY = Math.min(5, Math.max(0.05, +(s.gridScaleY + step).toFixed(2)));
+        return { ...s, gridScaleX: newX, gridScaleY: newY };
+      });
+      return;
+    }
+
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     const newScale = Math.min(Math.max(0.1, scale * delta), 20);
     setScale(newScale);
