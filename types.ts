@@ -38,3 +38,18 @@ export interface ImageAdjustments {
   highlights: number;
   brightness: number;
 }
+
+export interface PaperLayout {
+  isEnabled: boolean;
+  paperWidthCm: number;
+  paperHeightCm: number;
+  imageWidthCm: number;
+  imageHeightCm: number;
+  offsetXCm: number;
+  offsetYCm: number;
+  alignment: 'center' | 'top-left' | 'custom';
+  showCmLabels: boolean;
+  showCmExport: boolean;
+  includeSubdivisionsInList: boolean;
+}
+

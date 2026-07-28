@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GridOverlay } from './components/GridOverlay';
-import { GridSettings, ImageState, PaletteSettings, CropArea, ImageAdjustments } from './types';
+import { GridSettings, ImageState, PaletteSettings, CropArea, ImageAdjustments, PaperLayout } from './types';
+import { getGridLines, calculatePhysicalCm } from './gridUtils';
 import { 
   Upload, 
   Eye, 
@@ -25,7 +26,8 @@ import {
   Crop,
   Check,
   X as CloseIcon,
-  Download
+  Download,
+  Ruler
 } from 'lucide-react';
 
 const SliderWithArrows = ({ label, value, onChange, min = -100, max = 100 }: { label: string, value: number, onChange: (v: number) => void, min?: number, max?: number }) => (
@@ -75,6 +77,59 @@ const App: React.FC = () => {
     gridScaleX: 1,
     gridScaleY: 1
   });
+
+  const [activeGridTab, setActiveGridTab] = useState<'grid' | 'ruler'>('grid');
+  const [paperLayout, setPaperLayout] = useState<PaperLayout>({
+    isEnabled: false,
+    paperWidthCm: 21.0,
+    paperHeightCm: 29.7,
+    imageWidthCm: 21.0,
+    imageHeightCm: 29.7,
+    offsetXCm: 0,
+    offsetYCm: 0,
+    alignment: 'center',
+    showCmLabels: true,
+    showCmExport: true,
+    includeSubdivisionsInList: false
+  });
+
+  const handlePaperLayoutChange = useCallback((updates: Partial<PaperLayout>) => {
+    setPaperLayout(prev => {
+      const next = { ...prev, ...updates };
+      const imgAR = image.width > 0 ? image.height / image.width : 1;
+
+      if ('imageWidthCm' in updates && updates.imageWidthCm !== undefined) {
+        next.imageHeightCm = +(updates.imageWidthCm * imgAR).toFixed(1);
+      } else if ('imageHeightCm' in updates && updates.imageHeightCm !== undefined) {
+        next.imageWidthCm = +(updates.imageHeightCm / imgAR).toFixed(1);
+      }
+
+      if (next.imageWidthCm > next.paperWidthCm) {
+        next.imageWidthCm = next.paperWidthCm;
+        next.imageHeightCm = +(next.imageWidthCm * imgAR).toFixed(1);
+      }
+      if (next.imageHeightCm > next.paperHeightCm) {
+        next.imageHeightCm = next.paperHeightCm;
+        next.imageWidthCm = +(next.imageHeightCm / imgAR).toFixed(1);
+      }
+
+      if (next.alignment === 'center') {
+        next.offsetXCm = +((next.paperWidthCm - next.imageWidthCm) / 2).toFixed(1);
+        next.offsetYCm = +((next.paperHeightCm - next.imageHeightCm) / 2).toFixed(1);
+      } else if (next.alignment === 'top-left') {
+        next.offsetXCm = 0;
+        next.offsetYCm = 0;
+      } else {
+        next.offsetXCm = Math.max(0, Math.min(next.paperWidthCm - next.imageWidthCm, next.offsetXCm));
+        next.offsetYCm = Math.max(0, Math.min(next.paperHeightCm - next.imageHeightCm, next.offsetYCm));
+      }
+
+      next.offsetXCm = Math.max(0, +next.offsetXCm.toFixed(1));
+      next.offsetYCm = Math.max(0, +next.offsetYCm.toFixed(1));
+
+      return next;
+    });
+  }, [image.width, image.height]);
   
   const [palette, setPalette] = useState<PaletteSettings>({
     colors: Array(8).fill('#1e293b'),
@@ -130,6 +185,24 @@ const App: React.FC = () => {
         setIsGridMinimized(false);
         setIsLightMinimized(false);
         resetView();
+
+        const imgAR = img.height / img.width;
+        let defaultImgW = 21.0;
+        let defaultImgH = +(defaultImgW * imgAR).toFixed(1);
+        if (defaultImgH > 29.7) {
+          defaultImgH = 29.7;
+          defaultImgW = +(defaultImgH / imgAR).toFixed(1);
+        }
+        setPaperLayout(prev => ({
+          ...prev,
+          paperWidthCm: 21.0,
+          paperHeightCm: 29.7,
+          imageWidthCm: defaultImgW,
+          imageHeightCm: defaultImgH,
+          offsetXCm: +((21.0 - defaultImgW) / 2).toFixed(1),
+          offsetYCm: +((29.7 - defaultImgH) / 2).toFixed(1),
+          alignment: 'center'
+        }));
       };
       img.src = url;
     }
@@ -185,6 +258,28 @@ const App: React.FC = () => {
     }
     return points.join(' ');
   }, [adjustments.shadows, adjustments.highlights, adjustments.brightness]);
+
+  const cmLists = useMemo(() => {
+    if (!paperLayout.isEnabled) return { verticalCm: [], horizontalCm: [] };
+    const { hLines, vLines } = getGridLines(settings);
+
+    // vLines have X coordinate (pct)
+    const xList = vLines
+      .filter(line => paperLayout.includeSubdivisionsInList || line.isMain)
+      .map(line => calculatePhysicalCm(line.pct, paperLayout.offsetXCm, paperLayout.imageWidthCm))
+      .sort((a, b) => a - b);
+
+    // hLines have Y coordinate (pct)
+    const yList = hLines
+      .filter(line => paperLayout.includeSubdivisionsInList || line.isMain)
+      .map(line => calculatePhysicalCm(line.pct, paperLayout.offsetYCm, paperLayout.imageHeightCm))
+      .sort((a, b) => a - b);
+
+    return {
+      verticalCm: Array.from(new Set(xList)),
+      horizontalCm: Array.from(new Set(yList))
+    };
+  }, [settings, paperLayout]);
 
   const applyCurve = useCallback((val: number) => {
     const shadowVal = adjustments.shadows / 100;
@@ -254,6 +349,22 @@ const App: React.FC = () => {
       updateOffscreenCanvas(img);
       setIsCropping(false);
       resetView();
+
+      const imgAR = img.height / img.width;
+      let defaultImgW = 21.0;
+      let defaultImgH = +(defaultImgW * imgAR).toFixed(1);
+      if (defaultImgH > 29.7) {
+        defaultImgH = 29.7;
+        defaultImgW = +(defaultImgH / imgAR).toFixed(1);
+      }
+      setPaperLayout(prev => ({
+        ...prev,
+        imageWidthCm: defaultImgW,
+        imageHeightCm: defaultImgH,
+        offsetXCm: +((prev.paperWidthCm - defaultImgW) / 2).toFixed(1),
+        offsetYCm: +((prev.paperHeightCm - defaultImgH) / 2).toFixed(1),
+        alignment: 'center'
+      }));
     };
     img.src = newUrl;
   };
@@ -281,60 +392,100 @@ const App: React.FC = () => {
     }
 
     if (settings.isVisible) {
-      const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY, gridScaleX, gridScaleY } = settings;
-      const totalH = hDivisions * subDivisions;
-      const totalV = vDivisions * subDivisions;
-
-      const isCenter = (index: number, total: number) => Math.abs((index / total) - 0.5) < 0.001;
-      const isMain = (index: number) => index % subDivisions === 0;
-
-      const mod = (n: number, m: number) => ((n % m) + m) % m;
-      // Normalize to [-50, 50) for consistent anchor behavior
-      const normOffsetX = mod(gridOffsetX + 50, 100) - 50;
-      const normOffsetY = mod(gridOffsetY + 50, 100) - 50;
-
+      const { color } = settings;
+      const { hLines, vLines } = getGridLines(settings);
 
       ctx.strokeStyle = color;
 
-      // Horizontal lines — direct spacing, anchor at image center
-      const spacingYpx = (canvas.height * gridScaleY) / totalH;
-      const originYpx = canvas.height * 0.5 + (normOffsetY / 100) * canvas.height - (totalH / 2) * spacingYpx;
-      const startIY = Math.floor(-originYpx / spacingYpx) - 1;
-      const endIY = Math.ceil((canvas.height - originYpx) / spacingYpx) + 1;
+      const drawLabels = paperLayout.isEnabled && paperLayout.showCmExport;
+      const labelOutlineColor = color.toLowerCase() === '#ffffff' || color.toLowerCase() === '#fff' ? '#000000' : '#ffffff';
 
-      for (let i = startIY; i <= endIY; i++) {
-        const y = i * spacingYpx + originYpx;
-        if (y <= 0 || y >= canvas.height) continue;
-        const absI = Math.abs(i);
-        ctx.lineWidth = isCenter(absI, totalH) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
-        ctx.globalAlpha = isCenter(absI, totalH) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
+      // Horizontal lines (constant Y)
+      hLines.forEach(line => {
+        const y = (line.pct / 100) * canvas.height;
+        ctx.lineWidth = line.isCenter ? 2.5 : (line.isMain ? 1.2 : 0.4);
+        ctx.globalAlpha = line.isCenter ? 0.9 : (line.isMain ? 0.7 : 0.3);
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
-      }
 
-      // Vertical lines — direct spacing, anchor at image center
-      const spacingXpx = (canvas.width * gridScaleX) / totalV;
-      const originXpx = canvas.width * 0.5 + (normOffsetX / 100) * canvas.width - (totalV / 2) * spacingXpx;
-      const startIX = Math.floor(-originXpx / spacingXpx) - 1;
-      const endIX = Math.ceil((canvas.width - originXpx) / spacingXpx) + 1;
+        if (drawLabels && line.isMain) {
+          const cmVal = calculatePhysicalCm(line.pct, paperLayout.offsetYCm, paperLayout.imageHeightCm);
+          ctx.save();
+          ctx.globalAlpha = 1.0;
+          const fontSize = Math.max(12, Math.round(canvas.height * 0.015));
+          ctx.font = `bold ${fontSize}px monospace`;
+          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'left';
+          ctx.strokeStyle = labelOutlineColor;
+          ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.2));
+          ctx.strokeText(`${cmVal.toFixed(1)} см`, 8, y);
+          ctx.fillStyle = color;
+          ctx.fillText(`${cmVal.toFixed(1)} см`, 8, y);
+          ctx.restore();
+        }
+      });
 
-      for (let i = startIX; i <= endIX; i++) {
-        const x = i * spacingXpx + originXpx;
-        if (x <= 0 || x >= canvas.width) continue;
-        const absI = Math.abs(i);
-        ctx.lineWidth = isCenter(absI, totalV) ? 2.5 : (isMain(absI) ? 1.2 : 0.4);
-        ctx.globalAlpha = isCenter(absI, totalV) ? 0.9 : (isMain(absI) ? 0.7 : 0.3);
+      // Vertical lines (constant X)
+      vLines.forEach(line => {
+        const x = (line.pct / 100) * canvas.width;
+        ctx.lineWidth = line.isCenter ? 2.5 : (line.isMain ? 1.2 : 0.4);
+        ctx.globalAlpha = line.isCenter ? 0.9 : (line.isMain ? 0.7 : 0.3);
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, canvas.height);
         ctx.stroke();
-      }
 
+        if (drawLabels && line.isMain) {
+          const cmVal = calculatePhysicalCm(line.pct, paperLayout.offsetXCm, paperLayout.imageWidthCm);
+          ctx.save();
+          ctx.globalAlpha = 1.0;
+          const fontSize = Math.max(12, Math.round(canvas.height * 0.015));
+          ctx.font = `bold ${fontSize}px monospace`;
+          ctx.textBaseline = 'top';
+          ctx.textAlign = 'center';
+          ctx.strokeStyle = labelOutlineColor;
+          ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.2));
+          ctx.strokeText(cmVal.toFixed(1), x, 8);
+          ctx.fillStyle = color;
+          ctx.fillText(cmVal.toFixed(1), x, 8);
+          ctx.restore();
+        }
+      });
+
+      // Border and edge labels
       ctx.lineWidth = 2;
       ctx.globalAlpha = 0.8;
       ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+      if (drawLabels) {
+        ctx.globalAlpha = 1.0;
+        const fontSize = Math.max(12, Math.round(canvas.height * 0.015));
+        ctx.font = `bold ${fontSize}px monospace`;
+        ctx.strokeStyle = labelOutlineColor;
+        ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.2));
+        ctx.fillStyle = color;
+
+        // Top Left label
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'left';
+        ctx.strokeText(`Y: ${paperLayout.offsetXCm.toFixed(1)}x${paperLayout.offsetYCm.toFixed(1)}`, 8, 8);
+        ctx.fillText(`Y: ${paperLayout.offsetXCm.toFixed(1)}x${paperLayout.offsetYCm.toFixed(1)}`, 8, 8);
+
+        // Bottom Left label
+        ctx.textBaseline = 'bottom';
+        ctx.textAlign = 'left';
+        ctx.strokeText(`${(paperLayout.offsetYCm + paperLayout.imageHeightCm).toFixed(1)} см`, 8, canvas.height - 8);
+        ctx.fillText(`${(paperLayout.offsetYCm + paperLayout.imageHeightCm).toFixed(1)} см`, 8, canvas.height - 8);
+
+        // Top Right label
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'right';
+        ctx.strokeText(`${(paperLayout.offsetXCm + paperLayout.imageWidthCm).toFixed(1)} см`, canvas.width - 8, 8);
+        ctx.fillText(`${(paperLayout.offsetXCm + paperLayout.imageWidthCm).toFixed(1)} см`, canvas.width - 8, 8);
+      }
+      
       ctx.globalAlpha = 1.0;
     }
 
@@ -342,7 +493,7 @@ const App: React.FC = () => {
     link.download = `artgrid-export-${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
-  }, [image.width, image.height, image.url, settings, adjustments, applyCurve]);
+  }, [image.width, image.height, image.url, settings, adjustments, applyCurve, paperLayout]);
 
   const handleStart = (clientX: number, clientY: number, target?: EventTarget, ctrlKey?: boolean) => {
     if (!image.url) return;
@@ -626,7 +777,7 @@ const App: React.FC = () => {
                 style={{ filter: (adjustments.shadows !== 0 || adjustments.highlights !== 0 || adjustments.brightness !== 0) ? `url(#shadow-highlight-filter-${adjustments.shadows}-${adjustments.highlights}-${adjustments.brightness})` : 'none' }}
               />
               
-              {!isCropping && <GridOverlay settings={settings} imageWidth={image.width} imageHeight={image.height} />}
+              {!isCropping && <GridOverlay settings={settings} imageWidth={image.width} imageHeight={image.height} paperLayout={paperLayout} />}
               
               {isCropping && (
                   <div className="absolute inset-0 z-50">
@@ -851,125 +1002,343 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="p-5 space-y-5 overflow-y-auto max-h-[65vh]">
-                  <div className="space-y-3">
-                    <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                      <span>Вид</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setScale(s => Math.max(0.1, s - 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomOut size={18} /></button>
-                      <button onClick={resetView} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><RefreshCw size={18} /></button>
-                      <button onClick={() => setScale(s => Math.min(20, s + 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomIn size={18} /></button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                     <button 
-                      onClick={() => { setIsCropping(true); setIsPipetteActive(false); setCropArea({x: 10, y: 10, width: 80, height: 80}); }} 
-                      className="flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border text-slate-300 bg-slate-800 border-slate-700"
+                  {/* Tab Selector */}
+                  <div className="flex border-b border-slate-800 pb-1">
+                    <button 
+                      onClick={() => setActiveGridTab('grid')}
+                      className={`flex-1 pb-2 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2 text-center ${activeGridTab === 'grid' ? 'text-blue-500 border-blue-500' : 'text-slate-500 border-transparent hover:text-slate-300'}`}
                     >
-                      <Crop size={14} /><span>ОБРЕЗАТЬ</span>
+                      Сетка
                     </button>
-                     <button onClick={() => setSettings(s => ({ ...s, isSquare: !s.isSquare }))} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isSquare ? 'text-blue-400 bg-blue-400/10 border-blue-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
-                      <Square size={14} /><span>КВАДРАТ</span>
-                    </button>
-                    <button onClick={toggleVisibility} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isVisible ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
-                      {settings.isVisible ? <Eye size={14} /> : <EyeOff size={14} />}<span>СЕТКА</span>
+                    <button 
+                      onClick={() => setActiveGridTab('ruler')}
+                      className={`flex-1 pb-2 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2 text-center flex items-center justify-center gap-1 ${activeGridTab === 'ruler' ? 'text-blue-500 border-blue-500' : 'text-slate-500 border-transparent hover:text-slate-300'}`}
+                    >
+                      <Ruler size={11} />
+                      Линейка (см)
                     </button>
                   </div>
 
-                  <div className="space-y-4 pt-2 border-t border-slate-800">
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                        <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
-                        <span className="text-blue-400">{settings.vDivisions}</span>
-                      </div>
-                      <input type="range" min="1" max="40" step="1" value={settings.vDivisions} onChange={(e) => setSettings(s => ({...s, vDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                    </div>
-                    <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
-                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Ряды</span><span className="text-blue-400">{settings.hDivisions}</span></div>
-                      <input type="range" min="1" max="40" step="1" value={settings.hDivisions} disabled={settings.isSquare} onChange={(e) => setSettings(s => ({...s, hDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Детализация</span><span className="text-blue-400">{settings.subDivisions}</span></div>
-                      <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                    </div>
-                    
-                    {/* Grid Scale Controls */}
-                    <div className="space-y-3 pt-2 border-t border-slate-800">
-                      <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                        <span>Масштаб сетки</span>
-                        <button 
-                          onClick={() => setSettings(s => ({...s, gridScaleX: 1, gridScaleY: 1}))}
-                          className="text-blue-400 hover:text-blue-300 transition-colors"
-                          title="Сбросить масштаб (1×1)"
-                        >
-                          <RefreshCw size={12} />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {/* Row 1: empty, Y+, empty */}
-                        <div />
-                        <button 
-                          onClick={() => setSettings(s => {
-                            const newY = Math.min(5, +(s.gridScaleY + 0.05).toFixed(2));
-                            if (s.isSquare) return {...s, gridScaleX: newY, gridScaleY: newY};
-                            return {...s, gridScaleY: newY};
-                          })}
-                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Увеличить масштаб Y"
-                        >
-                          <Plus size={16} />
-                        </button>
-                        <div />
-                        {/* Row 2: X-, center display, X+ */}
-                        <button 
-                          onClick={() => setSettings(s => {
-                            const newX = Math.max(0.05, +(s.gridScaleX - 0.05).toFixed(2));
-                            if (s.isSquare) return {...s, gridScaleX: newX, gridScaleY: newX};
-                            return {...s, gridScaleX: newX};
-                          })}
-                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Уменьшить масштаб X"
-                        >
-                          <Minus size={16} />
-                        </button>
-                        <div className="flex items-center justify-center text-[10px] text-slate-500 font-mono">
-                          <span>X:{settings.gridScaleX.toFixed(2)} Y:{settings.gridScaleY.toFixed(2)}</span>
+                  {activeGridTab === 'grid' ? (
+                    <>
+                      <div className="space-y-3">
+                        <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                          <span>Вид</span>
                         </div>
-                        <button 
-                          onClick={() => setSettings(s => {
-                            const newX = Math.min(5, +(s.gridScaleX + 0.05).toFixed(2));
-                            if (s.isSquare) return {...s, gridScaleX: newX, gridScaleY: newX};
-                            return {...s, gridScaleX: newX};
-                          })}
-                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Увеличить масштаб X"
-                        >
-                          <Plus size={16} />
-                        </button>
-                        {/* Row 3: empty, Y-, empty */}
-                        <div />
-                        <button 
-                          onClick={() => setSettings(s => {
-                            const newY = Math.max(0.05, +(s.gridScaleY - 0.05).toFixed(2));
-                            if (s.isSquare) return {...s, gridScaleX: newY, gridScaleY: newY};
-                            return {...s, gridScaleY: newY};
-                          })}
-                          className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
-                          title="Уменьшить масштаб Y"
-                        >
-                          <Minus size={16} />
-                        </button>
-                        <div />
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setScale(s => Math.max(0.1, s - 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomOut size={18} /></button>
+                          <button onClick={resetView} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><RefreshCw size={18} /></button>
+                          <button onClick={() => setScale(s => Math.min(20, s + 0.2))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex-1 flex justify-center"><ZoomIn size={18} /></button>
+                        </div>
                       </div>
+
+                      <div className="flex flex-wrap gap-2">
+                         <button 
+                          onClick={() => { setIsCropping(true); setIsPipetteActive(false); setCropArea({x: 10, y: 10, width: 80, height: 80}); }} 
+                          className="flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border text-slate-300 bg-slate-800 border-slate-700"
+                        >
+                          <Crop size={14} /><span>ОБРЕЗАТЬ</span>
+                        </button>
+                         <button onClick={() => setSettings(s => ({ ...s, isSquare: !s.isSquare }))} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isSquare ? 'text-blue-400 bg-blue-400/10 border-blue-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
+                          <Square size={14} /><span>КВАДРАТ</span>
+                        </button>
+                        <button onClick={toggleVisibility} className={`flex-1 py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs font-bold border ${settings.isVisible ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' : 'text-slate-500 bg-slate-800 border-slate-700'}`}>
+                          {settings.isVisible ? <Eye size={14} /> : <EyeOff size={14} />}<span>СЕТКА</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-4 pt-2 border-t border-slate-800">
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                            <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
+                            <span className="text-blue-400">{settings.vDivisions}</span>
+                          </div>
+                          <input type="range" min="1" max="40" step="1" value={settings.vDivisions} onChange={(e) => setSettings(s => ({...s, vDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                        </div>
+                        <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
+                          <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Ряды</span><span className="text-blue-400">{settings.hDivisions}</span></div>
+                          <input type="range" min="1" max="40" step="1" value={settings.hDivisions} disabled={settings.isSquare} onChange={(e) => setSettings(s => ({...s, hDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Детализация</span><span className="text-blue-400">{settings.subDivisions}</span></div>
+                          <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                        </div>
+                        
+                        {/* Grid Scale Controls */}
+                        <div className="space-y-3 pt-2 border-t border-slate-800">
+                          <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                            <span>Масштаб сетки</span>
+                            <button 
+                              onClick={() => setSettings(s => ({...s, gridScaleX: 1, gridScaleY: 1}))}
+                              className="text-blue-400 hover:text-blue-300 transition-colors"
+                              title="Сбросить масштаб (1×1)"
+                            >
+                              <RefreshCw size={12} />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div />
+                            <button 
+                              onClick={() => setSettings(s => {
+                                const newY = Math.min(5, +(s.gridScaleY + 0.05).toFixed(2));
+                                if (s.isSquare) return {...s, gridScaleX: newY, gridScaleY: newY};
+                                return {...s, gridScaleY: newY};
+                              })}
+                              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                              title="Увеличить масштаб Y"
+                            >
+                              <Plus size={16} />
+                            </button>
+                            <div />
+                            <button 
+                              onClick={() => setSettings(s => {
+                                const newX = Math.max(0.05, +(s.gridScaleX - 0.05).toFixed(2));
+                                if (s.isSquare) return {...s, gridScaleX: newX, gridScaleY: newX};
+                                return {...s, gridScaleX: newX};
+                              })}
+                              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                              title="Уменьшить масштаб X"
+                            >
+                              <Minus size={16} />
+                            </button>
+                            <div className="flex items-center justify-center text-[10px] text-slate-500 font-mono">
+                              <span>X:{settings.gridScaleX.toFixed(2)} Y:{settings.gridScaleY.toFixed(2)}</span>
+                            </div>
+                            <button 
+                              onClick={() => setSettings(s => {
+                                const newX = Math.min(5, +(s.gridScaleX + 0.05).toFixed(2));
+                                if (s.isSquare) return {...s, gridScaleX: newX, gridScaleY: newX};
+                                return {...s, gridScaleX: newX};
+                              })}
+                              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                              title="Увеличить масштаб X"
+                            >
+                              <Plus size={16} />
+                            </button>
+                            <div />
+                            <button 
+                              onClick={() => setSettings(s => {
+                                const newY = Math.max(0.05, +(s.gridScaleY - 0.05).toFixed(2));
+                                if (s.isSquare) return {...s, gridScaleX: newY, gridScaleY: newY};
+                                return {...s, gridScaleY: newY};
+                              })}
+                              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 flex justify-center active:scale-95 transition-all"
+                              title="Уменьшить масштаб Y"
+                            >
+                              <Minus size={16} />
+                            </button>
+                            <div />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex justify-between gap-2 pt-4 border-t border-slate-800">
+                          {['#ffffff', '#000000', '#ff3e3e', '#3eff3e', '#3e8cff', '#ffff3e'].map(color => (
+                              <button key={color} onClick={() => setSettings(s => ({...s, color}))} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${settings.color === color ? 'border-blue-500 scale-110 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-slate-800'}`} style={{ backgroundColor: color }} />
+                          ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Enable Switch */}
+                      <div className="flex items-center justify-between py-1">
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Включить линейку</span>
+                        <button 
+                          onClick={() => handlePaperLayoutChange({ isEnabled: !paperLayout.isEnabled })}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none ${paperLayout.isEnabled ? 'bg-blue-600' : 'bg-slate-800'}`}
+                        >
+                          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${paperLayout.isEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
+
+                      {paperLayout.isEnabled && (
+                        <div className="space-y-3 pt-2 border-t border-slate-850 animate-in fade-in duration-150">
+                          {/* Presets */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Размер бумаги (Лист)</label>
+                            <select 
+                              value={
+                                paperLayout.paperWidthCm === 21.0 && paperLayout.paperHeightCm === 29.7 ? 'a4' :
+                                paperLayout.paperWidthCm === 29.7 && paperLayout.paperHeightCm === 42.0 ? 'a3' :
+                                paperLayout.paperWidthCm === 14.8 && paperLayout.paperHeightCm === 21.0 ? 'a5' :
+                                paperLayout.paperWidthCm === 21.6 && paperLayout.paperHeightCm === 27.9 ? 'letter' : 'custom'
+                              }
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === 'a4') handlePaperLayoutChange({ paperWidthCm: 21.0, paperHeightCm: 29.7 });
+                                else if (val === 'a3') handlePaperLayoutChange({ paperWidthCm: 29.7, paperHeightCm: 42.0 });
+                                else if (val === 'a5') handlePaperLayoutChange({ paperWidthCm: 14.8, paperHeightCm: 21.0 });
+                                else if (val === 'letter') handlePaperLayoutChange({ paperWidthCm: 21.6, paperHeightCm: 27.9 });
+                              }}
+                              className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 outline-none focus:border-blue-500"
+                            >
+                              <option value="a4">A4 (21.0 × 29.7 см)</option>
+                              <option value="a3">A3 (29.7 × 42.0 см)</option>
+                              <option value="a5">A5 (14.8 × 21.0 см)</option>
+                              <option value="letter">Letter (21.6 × 27.9 см)</option>
+                              <option value="custom">Свой размер...</option>
+                            </select>
+                          </div>
+
+                          {/* Paper Size custom inputs */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Лист Ш (см)</span>
+                              <input 
+                                type="number" 
+                                step="0.1" 
+                                value={paperLayout.paperWidthCm} 
+                                onChange={(e) => handlePaperLayoutChange({ paperWidthCm: parseFloat(e.target.value) || 0 })}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Лист В (см)</span>
+                              <input 
+                                type="number" 
+                                step="0.1" 
+                                value={paperLayout.paperHeightCm} 
+                                onChange={(e) => handlePaperLayoutChange({ paperHeightCm: parseFloat(e.target.value) || 0 })}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Image size physical */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Рисунок Ш (см)</span>
+                              <input 
+                                type="number" 
+                                step="0.1" 
+                                value={paperLayout.imageWidthCm} 
+                                onChange={(e) => handlePaperLayoutChange({ imageWidthCm: parseFloat(e.target.value) || 0 })}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Рисунок В (см)</span>
+                              <input 
+                                type="number" 
+                                step="0.1" 
+                                value={paperLayout.imageHeightCm} 
+                                onChange={(e) => handlePaperLayoutChange({ imageHeightCm: parseFloat(e.target.value) || 0 })}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Alignment */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Выравнивание на листе</label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {(['center', 'top-left', 'custom'] as const).map(align => (
+                                <button
+                                  key={align}
+                                  onClick={() => handlePaperLayoutChange({ alignment: align })}
+                                  className={`py-1 px-1.5 rounded-lg text-[10px] font-bold transition-all border ${paperLayout.alignment === align ? 'text-blue-400 bg-blue-400/10 border-blue-400/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}
+                                >
+                                  {align === 'center' ? 'Центр' : align === 'top-left' ? 'Угол' : 'Смещение'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Offset inputs if custom */}
+                          {paperLayout.alignment === 'custom' && (
+                            <div className="grid grid-cols-2 gap-2 animate-in slide-in-from-top-1 duration-100">
+                              <div className="space-y-1">
+                                <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Слева X (см)</span>
+                                <input 
+                                  type="number" 
+                                  step="0.1" 
+                                  value={paperLayout.offsetXCm} 
+                                  onChange={(e) => handlePaperLayoutChange({ offsetXCm: parseFloat(e.target.value) || 0 })}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Сверху Y (см)</span>
+                                <input 
+                                  type="number" 
+                                  step="0.1" 
+                                  value={paperLayout.offsetYCm} 
+                                  onChange={(e) => handlePaperLayoutChange({ offsetYCm: parseFloat(e.target.value) || 0 })}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Checkboxes */}
+                          <div className="space-y-1.5 pt-2 border-t border-slate-850">
+                            <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={paperLayout.showCmLabels} 
+                                onChange={(e) => handlePaperLayoutChange({ showCmLabels: e.target.checked })}
+                                className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-0 w-3.5 h-3.5"
+                              />
+                              <span>Разметка в см на экране</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={paperLayout.showCmExport} 
+                                onChange={(e) => handlePaperLayoutChange({ showCmExport: e.target.checked })}
+                                className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-0 w-3.5 h-3.5"
+                              />
+                              <span>Разметка на экспортном файле</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={paperLayout.includeSubdivisionsInList} 
+                                onChange={(e) => handlePaperLayoutChange({ includeSubdivisionsInList: e.target.checked })}
+                                className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-0 w-3.5 h-3.5"
+                              />
+                              <span>Мелкие деления в списке</span>
+                            </label>
+                          </div>
+
+                          {/* Ruler marks list */}
+                          <div className="space-y-2 pt-2.5 border-t border-slate-850">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Отметки для линейки (см)</div>
+                            <div className="space-y-2">
+                              <div>
+                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Горизонтальные (сверху/снизу листа):</div>
+                                <div className="flex flex-wrap gap-1 mt-1 max-h-20 overflow-y-auto pr-1">
+                                  {cmLists.verticalCm.length > 0 ? (
+                                    cmLists.verticalCm.map((val, idx) => (
+                                      <span key={idx} className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-[10px] font-mono text-slate-300">
+                                        {val.toFixed(1)}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-[10px] text-slate-650 italic">Нет линий</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Вертикальные (слева/справа листа):</div>
+                                <div className="flex flex-wrap gap-1 mt-1 max-h-20 overflow-y-auto pr-1">
+                                  {cmLists.horizontalCm.length > 0 ? (
+                                    cmLists.horizontalCm.map((val, idx) => (
+                                      <span key={idx} className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-[10px] font-mono text-slate-300">
+                                        {val.toFixed(1)}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-[10px] text-slate-650 italic">Нет линий</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  
-                  <div className="flex justify-between gap-2 pt-4 border-t border-slate-800">
-                      {['#ffffff', '#000000', '#ff3e3e', '#3eff3e', '#3e8cff', '#ffff3e'].map(color => (
-                          <button key={color} onClick={() => setSettings(s => ({...s, color}))} className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${settings.color === color ? 'border-blue-500 scale-110 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-slate-800'}`} style={{ backgroundColor: color }} />
-                      ))}
-                  </div>
+                  )}
                 </div>
               </div>
             )}

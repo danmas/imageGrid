@@ -1,90 +1,113 @@
 
 import React from 'react';
-import { GridSettings } from '../types';
+import { GridSettings, PaperLayout } from '../types';
+import { getGridLines, calculatePhysicalCm } from '../gridUtils';
 
 interface GridOverlayProps {
   settings: GridSettings;
   imageWidth: number;
   imageHeight: number;
+  paperLayout?: PaperLayout;
 }
 
-export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, imageHeight }) => {
+export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, imageHeight, paperLayout }) => {
   if (!settings.isVisible || imageWidth === 0 || imageHeight === 0) return null;
 
-  const { hDivisions, vDivisions, subDivisions, color, gridOffsetX, gridOffsetY, gridScaleX, gridScaleY } = settings;
-  const horizontalLines = [];
-  const verticalLines = [];
-
-  // Total lines for each direction including sub-divisions
-  const totalH = hDivisions * subDivisions;
-  const totalV = vDivisions * subDivisions;
-
-  const isCenter = (index: number, total: number) => {
-    return Math.abs((index / total) - 0.5) < 0.001;
-  };
-
-  const isMain = (index: number) => index % subDivisions === 0;
+  const { color, gridOffsetX, gridOffsetY } = settings;
+  const { hLines, vLines } = getGridLines(settings);
 
   // Safe modulo (handles negative)
   const mod = (n: number, m: number) => ((n % m) + m) % m;
-
-  // Normalize offset to [-50, 50) so that 50+normOffset stays in [0, 100) (circle always visible)
   const normOffsetX = mod(gridOffsetX + 50, 100) - 50;
   const normOffsetY = mod(gridOffsetY + 50, 100) - 50;
 
-  // Horizontal Lines — direct spacing, anchor at image center (50%)
-  const spacingY = (100 * gridScaleY) / totalH;
-  const originY = 50 + normOffsetY - (totalH / 2) * spacingY;
-  const startIY = Math.floor(-originY / spacingY) - 1;
-  const endIY = Math.ceil((100 - originY) / spacingY) + 1;
+  const showLabels = paperLayout?.isEnabled && paperLayout?.showCmLabels;
+  const paperW = paperLayout?.paperWidthCm ?? 21.0;
+  const paperH = paperLayout?.paperHeightCm ?? 29.7;
+  const imgW = paperLayout?.imageWidthCm ?? 21.0;
+  const imgH = paperLayout?.imageHeightCm ?? 29.7;
+  const offsetX = paperLayout?.offsetXCm ?? 0;
+  const offsetY = paperLayout?.offsetYCm ?? 0;
 
-  for (let i = startIY; i <= endIY; i++) {
-    const y = i * spacingY + originY;
-    if (y <= 0.001 || y >= 99.999) continue; // skip border positions
-    const absI = Math.abs(i);
-    const isMainLine = isMain(absI);
-    const isCenterLine = isCenter(absI, totalH);
+  const labelOutlineColor = color.toLowerCase() === '#ffffff' || color.toLowerCase() === '#fff' ? '#000000' : '#ffffff';
 
-    horizontalLines.push(
-      <line
-        key={`h-${i}`}
-        x1="0"
-        y1={`${y}%`}
-        x2="100%"
-        y2={`${y}%`}
-        stroke={color}
-        strokeWidth={isCenterLine ? "2.5" : (isMainLine ? "1.2" : "0.4")}
-        strokeOpacity={isCenterLine ? "0.9" : (isMainLine ? "0.7" : "0.3")}
-      />
+  const labelStyle: React.CSSProperties = {
+    fontSize: '11px',
+    fontFamily: 'monospace',
+    fontWeight: 'bold',
+    fill: color,
+    stroke: labelOutlineColor,
+    strokeWidth: '2.5px',
+    paintOrder: 'stroke',
+    userSelect: 'none'
+  };
+
+  const horizontalLines = hLines.map((line) => {
+    const y = line.pct;
+    const isMainLine = line.isMain;
+    const isCenterLine = line.isCenter;
+
+    const cmVal = calculatePhysicalCm(y, offsetY, imgH);
+    const showLabelOnLine = showLabels && isMainLine;
+
+    return (
+      <g key={`h-group-${line.index}`}>
+        <line
+          x1="0"
+          y1={`${y}%`}
+          x2="100%"
+          y2={`${y}%`}
+          stroke={color}
+          strokeWidth={isCenterLine ? "2.5" : (isMainLine ? "1.2" : "0.4")}
+          strokeOpacity={isCenterLine ? "0.9" : (isMainLine ? "0.7" : "0.3")}
+        />
+        {showLabelOnLine && (
+          <text
+            x="8"
+            y={`${y}%`}
+            dy="4"
+            style={labelStyle}
+            textAnchor="start"
+          >
+            {cmVal.toFixed(1)}
+          </text>
+        )}
+      </g>
     );
-  }
+  });
 
-  // Vertical Lines — direct spacing, anchor at image center (50%)
-  const spacingX = (100 * gridScaleX) / totalV;
-  const originX = 50 + normOffsetX - (totalV / 2) * spacingX;
-  const startIX = Math.floor(-originX / spacingX) - 1;
-  const endIX = Math.ceil((100 - originX) / spacingX) + 1;
+  const verticalLines = vLines.map((line) => {
+    const x = line.pct;
+    const isMainLine = line.isMain;
+    const isCenterLine = line.isCenter;
 
-  for (let i = startIX; i <= endIX; i++) {
-    const x = i * spacingX + originX;
-    if (x <= 0.001 || x >= 99.999) continue; // skip border positions
-    const absI = Math.abs(i);
-    const isMainLine = isMain(absI);
-    const isCenterLine = isCenter(absI, totalV);
+    const cmVal = calculatePhysicalCm(x, offsetX, imgW);
+    const showLabelOnLine = showLabels && isMainLine;
 
-    verticalLines.push(
-      <line
-        key={`v-${i}`}
-        x1={`${x}%`}
-        y1="0"
-        x2={`${x}%`}
-        y2="100%"
-        stroke={color}
-        strokeWidth={isCenterLine ? "2.5" : (isMainLine ? "1.2" : "0.4")}
-        strokeOpacity={isCenterLine ? "0.9" : (isMainLine ? "0.7" : "0.3")}
-      />
+    return (
+      <g key={`v-group-${line.index}`}>
+        <line
+          x1={`${x}%`}
+          y1="0"
+          x2={`${x}%`}
+          y2="100%"
+          stroke={color}
+          strokeWidth={isCenterLine ? "2.5" : (isMainLine ? "1.2" : "0.4")}
+          strokeOpacity={isCenterLine ? "0.9" : (isMainLine ? "0.7" : "0.3")}
+        />
+        {showLabelOnLine && (
+          <text
+            x={`${x}%`}
+            y="16"
+            style={labelStyle}
+            textAnchor="middle"
+          >
+            {cmVal.toFixed(1)}
+          </text>
+        )}
+      </g>
     );
-  }
+  });
 
   return (
     <svg
@@ -104,8 +127,28 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
         strokeWidth="2" 
         strokeOpacity="0.8"
       />
+      
       {horizontalLines}
       {verticalLines}
+
+      {/* Edge labels for image boundaries */}
+      {showLabels && (
+        <>
+          {/* Top Edge (offsetY) */}
+          <text x="8" y="16" style={labelStyle} textAnchor="start">
+            Y: {offsetX.toFixed(1)}x{offsetY.toFixed(1)}
+          </text>
+          {/* Bottom Edge label (offsetY + imgH) */}
+          <text x="8" y={imageHeight - 8} style={labelStyle} textAnchor="start">
+            {(offsetY + imgH).toFixed(1)} см
+          </text>
+          {/* Right Edge label (offsetX + imgW) */}
+          <text x={imageWidth - 8} y="16" style={labelStyle} textAnchor="end">
+            {(offsetX + imgW).toFixed(1)} см
+          </text>
+        </>
+      )}
+
       {/* Grid center marker (0,0) */}
       <circle
         cx={`${50 + normOffsetX}%`}
@@ -119,3 +162,4 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
     </svg>
   );
 };
+
