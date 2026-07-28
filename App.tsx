@@ -265,13 +265,13 @@ const App: React.FC = () => {
 
     // vLines have X coordinate (pct)
     const xList = vLines
-      .filter(line => paperLayout.includeSubdivisionsInList || line.isMain)
+      .filter(line => paperLayout.includeSubdivisionsInList || line.isMain || line.isCenter)
       .map(line => calculatePhysicalCm(line.pct, paperLayout.offsetXCm, paperLayout.imageWidthCm))
       .sort((a, b) => a - b);
 
     // hLines have Y coordinate (pct)
     const yList = hLines
-      .filter(line => paperLayout.includeSubdivisionsInList || line.isMain)
+      .filter(line => paperLayout.includeSubdivisionsInList || line.isMain || line.isCenter)
       .map(line => calculatePhysicalCm(line.pct, paperLayout.offsetYCm, paperLayout.imageHeightCm))
       .sort((a, b) => a - b);
 
@@ -410,7 +410,7 @@ const App: React.FC = () => {
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
 
-        if (drawLabels && line.isMain) {
+        if (drawLabels && (line.isMain || line.isCenter)) {
           const cmVal = calculatePhysicalCm(line.pct, paperLayout.offsetYCm, paperLayout.imageHeightCm);
           ctx.save();
           ctx.globalAlpha = 1.0;
@@ -437,7 +437,7 @@ const App: React.FC = () => {
         ctx.lineTo(x, canvas.height);
         ctx.stroke();
 
-        if (drawLabels && line.isMain) {
+        if (drawLabels && (line.isMain || line.isCenter)) {
           const cmVal = calculatePhysicalCm(line.pct, paperLayout.offsetXCm, paperLayout.imageWidthCm);
           ctx.save();
           ctx.globalAlpha = 1.0;

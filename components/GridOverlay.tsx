@@ -48,7 +48,7 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
     const isCenterLine = line.isCenter;
 
     const cmVal = calculatePhysicalCm(y, offsetY, imgH);
-    const showLabelOnLine = showLabels && isMainLine;
+    const showLabelOnLine = showLabels && (isMainLine || isCenterLine);
 
     return (
       <g key={`h-group-${line.index}`}>
@@ -82,7 +82,7 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
     const isCenterLine = line.isCenter;
 
     const cmVal = calculatePhysicalCm(x, offsetX, imgW);
-    const showLabelOnLine = showLabels && isMainLine;
+    const showLabelOnLine = showLabels && (isMainLine || isCenterLine);
 
     return (
       <g key={`v-group-${line.index}`}>
