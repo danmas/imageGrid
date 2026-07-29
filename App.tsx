@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GridOverlay } from './components/GridOverlay';
+import { PaperPreview } from './components/PaperPreview';
 import { GridSettings, ImageState, PaletteSettings, CropArea, ImageAdjustments, PaperLayout } from './types';
 import { getGridLines, calculatePhysicalCm } from './gridUtils';
 import { 
@@ -1219,6 +1220,13 @@ const App: React.FC = () => {
 
                       {paperLayout.isEnabled && (
                         <div className="space-y-3 pt-2 border-t border-slate-850 animate-in fade-in duration-150">
+                          {/* Sheet Layout Preview with Drag and Drop */}
+                          <PaperPreview 
+                            paperLayout={paperLayout} 
+                            imageUrl={image.url} 
+                            onChange={handlePaperLayoutChange} 
+                          />
+
                           {/* Presets */}
                           <div className="space-y-1">
                             <label className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Размер бумаги (Лист)</label>
