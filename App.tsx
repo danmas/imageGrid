@@ -1082,15 +1082,23 @@ const App: React.FC = () => {
                                   type="number" 
                                   step="0.1"
                                   min="0.1"
-                                  value={settings.physicalStepX} 
+                                  value={settings.physicalStepX === 0 ? '' : settings.physicalStepX} 
                                   onChange={(e) => {
+                                    const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                    setSettings(s => {
+                                      const nextVal = isNaN(val) ? 0 : val;
+                                      if (s.isSquare) return { ...s, physicalStepX: nextVal, physicalStepY: nextVal };
+                                      return { ...s, physicalStepX: nextVal };
+                                    });
+                                  }}
+                                  onBlur={(e) => {
                                     const val = Math.max(0.1, parseFloat(e.target.value) || 0.1);
                                     setSettings(s => {
                                       if (s.isSquare) return { ...s, physicalStepX: val, physicalStepY: val };
                                       return { ...s, physicalStepX: val };
                                     });
                                   }}
-                                  className="w-full bg-slate-850 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
                                 />
                               </div>
                               <div className={`space-y-1 ${settings.isSquare ? 'opacity-30 pointer-events-none' : ''}`}>
@@ -1105,7 +1113,7 @@ const App: React.FC = () => {
                                     const val = Math.max(0.1, parseFloat(e.target.value) || 0.1);
                                     setSettings(s => ({ ...s, physicalStepY: val }));
                                   }}
-                                  className="w-full bg-slate-850 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
                                 />
                               </div>
                             </div>
