@@ -75,7 +75,10 @@ const App: React.FC = () => {
     gridOffsetX: 0,
     gridOffsetY: 0,
     gridScaleX: 1,
-    gridScaleY: 1
+    gridScaleY: 1,
+    usePhysicalStep: false,
+    physicalStepX: 2.0,
+    physicalStepY: 2.0
   });
 
   const [activeGridTab, setActiveGridTab] = useState<'grid' | 'ruler'>('grid');
@@ -220,22 +223,31 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (settings.isSquare && image.width > 0 && image.height > 0) {
-      const aspectRatio = image.height / image.width;
-      const newH = Math.round(settings.vDivisions * aspectRatio);
       const updates: Partial<typeof settings> = {};
-      if (newH !== settings.hDivisions) {
-        updates.hDivisions = Math.max(1, newH);
+      
+      if (settings.usePhysicalStep) {
+        if (settings.physicalStepX !== settings.physicalStepY) {
+          updates.physicalStepY = settings.physicalStepX;
+        }
+      } else {
+        const aspectRatio = image.height / image.width;
+        const newH = Math.round(settings.vDivisions * aspectRatio);
+        if (newH !== settings.hDivisions) {
+          updates.hDivisions = Math.max(1, newH);
+        }
       }
+
       if (settings.gridScaleX !== settings.gridScaleY) {
         const avg = +((settings.gridScaleX + settings.gridScaleY) / 2).toFixed(2);
         updates.gridScaleX = avg;
         updates.gridScaleY = avg;
       }
+      
       if (Object.keys(updates).length > 0) {
         setSettings(prev => ({ ...prev, ...updates }));
       }
     }
-  }, [settings.isSquare, settings.vDivisions, image.width, image.height]);
+  }, [settings.isSquare, settings.vDivisions, settings.usePhysicalStep, settings.physicalStepX, settings.physicalStepY, image.width, image.height]);
 
   const filterTableValues = useMemo(() => {
     const shadowVal = adjustments.shadows / 100;
@@ -261,7 +273,7 @@ const App: React.FC = () => {
 
   const cmLists = useMemo(() => {
     if (!paperLayout.isEnabled) return { verticalCm: [], horizontalCm: [] };
-    const { hLines, vLines } = getGridLines(settings);
+    const { hLines, vLines } = getGridLines(settings, paperLayout.imageWidthCm, paperLayout.imageHeightCm);
 
     // vLines have X coordinate (pct)
     const xList = vLines
@@ -393,7 +405,7 @@ const App: React.FC = () => {
 
     if (settings.isVisible) {
       const { color } = settings;
-      const { hLines, vLines } = getGridLines(settings);
+      const { hLines, vLines } = getGridLines(settings, paperLayout.imageWidthCm, paperLayout.imageHeightCm);
 
       ctx.strokeStyle = color;
 
@@ -1048,17 +1060,71 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="space-y-4 pt-2 border-t border-slate-800">
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                            <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
-                            <span className="text-blue-400">{settings.vDivisions}</span>
+                        {paperLayout.isEnabled && (
+                          <div className="flex items-center justify-between py-1">
+                            <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Задавать шаг в см</span>
+                            <button 
+                              onClick={() => setSettings(s => ({ ...s, usePhysicalStep: !s.usePhysicalStep }))}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none ${settings.usePhysicalStep ? 'bg-blue-600' : 'bg-slate-800'}`}
+                            >
+                              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform duration-200 ${settings.usePhysicalStep ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                            </button>
                           </div>
-                          <input type="range" min="1" max="40" step="1" value={settings.vDivisions} onChange={(e) => setSettings(s => ({...s, vDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                        </div>
-                        <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
-                          <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Ряды</span><span className="text-blue-400">{settings.hDivisions}</span></div>
-                          <input type="range" min="1" max="40" step="1" value={settings.hDivisions} disabled={settings.isSquare} onChange={(e) => setSettings(s => ({...s, hDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                        </div>
+                        )}
+
+                        {settings.usePhysicalStep && paperLayout.isEnabled ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Шаг X (см)</span>
+                                <input 
+                                  type="number" 
+                                  step="0.1"
+                                  min="0.1"
+                                  value={settings.physicalStepX} 
+                                  onChange={(e) => {
+                                    const val = Math.max(0.1, parseFloat(e.target.value) || 0.1);
+                                    setSettings(s => {
+                                      if (s.isSquare) return { ...s, physicalStepX: val, physicalStepY: val };
+                                      return { ...s, physicalStepX: val };
+                                    });
+                                  }}
+                                  className="w-full bg-slate-850 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                                />
+                              </div>
+                              <div className={`space-y-1 ${settings.isSquare ? 'opacity-30 pointer-events-none' : ''}`}>
+                                <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Шаг Y (см)</span>
+                                <input 
+                                  type="number" 
+                                  step="0.1"
+                                  min="0.1"
+                                  disabled={settings.isSquare}
+                                  value={settings.physicalStepY} 
+                                  onChange={(e) => {
+                                    const val = Math.max(0.1, parseFloat(e.target.value) || 0.1);
+                                    setSettings(s => ({ ...s, physicalStepY: val }));
+                                  }}
+                                  className="w-full bg-slate-850 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                                <span>{settings.isSquare ? 'Ячейки (Ш)' : 'Колонки'}</span>
+                                <span className="text-blue-400">{settings.vDivisions}</span>
+                              </div>
+                              <input type="range" min="1" max="40" step="1" value={settings.vDivisions} onChange={(e) => setSettings(s => ({...s, vDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                            </div>
+                            <div className={`space-y-2 transition-opacity ${settings.isSquare ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
+                              <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Ряды</span><span className="text-blue-400">{settings.hDivisions}</span></div>
+                              <input type="range" min="1" max="40" step="1" value={settings.hDivisions} disabled={settings.isSquare} onChange={(e) => setSettings(s => ({...s, hDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                            </div>
+                          </>
+                        )}
+
                         <div className="space-y-2">
                           <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-slate-500"><span>Детализация</span><span className="text-blue-400">{settings.subDivisions}</span></div>
                           <input type="range" min="1" max="8" step="1" value={settings.subDivisions} onChange={(e) => setSettings(s => ({...s, subDivisions: parseInt(e.target.value)}))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />

@@ -10,6 +10,9 @@ export interface GridSettings {
   gridOffsetY: number; // Vertical grid offset in % of image height
   gridScaleX: number; // Horizontal grid scale factor (1.0 = normal, step 0.05)
   gridScaleY: number; // Vertical grid scale factor (1.0 = normal, step 0.05)
+  usePhysicalStep: boolean;
+  physicalStepX: number;
+  physicalStepY: number;
 }
 
 export interface PaletteSettings {

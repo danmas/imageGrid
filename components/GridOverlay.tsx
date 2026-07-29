@@ -14,12 +14,6 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
   if (!settings.isVisible || imageWidth === 0 || imageHeight === 0) return null;
 
   const { color, gridOffsetX, gridOffsetY } = settings;
-  const { hLines, vLines } = getGridLines(settings);
-
-  // Safe modulo (handles negative)
-  const mod = (n: number, m: number) => ((n % m) + m) % m;
-  const normOffsetX = mod(gridOffsetX + 50, 100) - 50;
-  const normOffsetY = mod(gridOffsetY + 50, 100) - 50;
 
   const showLabels = paperLayout?.isEnabled && paperLayout?.showCmLabels;
   const paperW = paperLayout?.paperWidthCm ?? 21.0;
@@ -28,6 +22,13 @@ export const GridOverlay: React.FC<GridOverlayProps> = ({ settings, imageWidth, 
   const imgH = paperLayout?.imageHeightCm ?? 29.7;
   const offsetX = paperLayout?.offsetXCm ?? 0;
   const offsetY = paperLayout?.offsetYCm ?? 0;
+
+  const { hLines, vLines } = getGridLines(settings, imgW, imgH);
+
+  // Safe modulo (handles negative)
+  const mod = (n: number, m: number) => ((n % m) + m) % m;
+  const normOffsetX = mod(gridOffsetX + 50, 100) - 50;
+  const normOffsetY = mod(gridOffsetY + 50, 100) - 50;
 
   const labelOutlineColor = color.toLowerCase() === '#ffffff' || color.toLowerCase() === '#fff' ? '#000000' : '#ffffff';
 
