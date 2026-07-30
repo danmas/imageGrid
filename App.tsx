@@ -146,6 +146,7 @@ const App: React.FC = () => {
   const [isPipetteActive, setIsPipetteActive] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
   const [cropArea, setCropArea] = useState<CropArea>({ x: 0, y: 0, width: 100, height: 100 });
+  const [shrinkToNewSize, setShrinkToNewSize] = useState(false);
   const [adjustments, setAdjustments] = useState<ImageAdjustments>({ shadows: 0, highlights: 0, brightness: 0 });
   
   const [scale, setScale] = useState(1);
@@ -363,21 +364,38 @@ const App: React.FC = () => {
       setIsCropping(false);
       resetView();
 
-      const imgAR = img.height / img.width;
-      let defaultImgW = 21.0;
-      let defaultImgH = +(defaultImgW * imgAR).toFixed(1);
-      if (defaultImgH > 29.7) {
-        defaultImgH = 29.7;
-        defaultImgW = +(defaultImgH / imgAR).toFixed(1);
+      if (shrinkToNewSize) {
+        // Calculate new size and offsets based on current layout and cropArea
+        const newWidthCm = +(paperLayout.imageWidthCm * (cropArea.width / 100)).toFixed(1);
+        const newHeightCm = +(paperLayout.imageHeightCm * (cropArea.height / 100)).toFixed(1);
+        const newOffsetXCm = +(paperLayout.offsetXCm + paperLayout.imageWidthCm * (cropArea.x / 100)).toFixed(1);
+        const newOffsetYCm = +(paperLayout.offsetYCm + paperLayout.imageHeightCm * (cropArea.y / 100)).toFixed(1);
+
+        setPaperLayout(prev => ({
+          ...prev,
+          imageWidthCm: newWidthCm,
+          imageHeightCm: newHeightCm,
+          offsetXCm: Math.max(0, newOffsetXCm),
+          offsetYCm: Math.max(0, newOffsetYCm),
+          alignment: 'custom'
+        }));
+      } else {
+        const imgAR = img.height / img.width;
+        let defaultImgW = 21.0;
+        let defaultImgH = +(defaultImgW * imgAR).toFixed(1);
+        if (defaultImgH > 29.7) {
+          defaultImgH = 29.7;
+          defaultImgW = +(defaultImgH / imgAR).toFixed(1);
+        }
+        setPaperLayout(prev => ({
+          ...prev,
+          imageWidthCm: defaultImgW,
+          imageHeightCm: defaultImgH,
+          offsetXCm: +((prev.paperWidthCm - defaultImgW) / 2).toFixed(1),
+          offsetYCm: +((prev.paperHeightCm - defaultImgH) / 2).toFixed(1),
+          alignment: 'center'
+        }));
       }
-      setPaperLayout(prev => ({
-        ...prev,
-        imageWidthCm: defaultImgW,
-        imageHeightCm: defaultImgH,
-        offsetXCm: +((prev.paperWidthCm - defaultImgW) / 2).toFixed(1),
-        offsetYCm: +((prev.paperHeightCm - defaultImgH) / 2).toFixed(1),
-        alignment: 'center'
-      }));
     };
     img.src = newUrl;
   };
@@ -701,21 +719,32 @@ const App: React.FC = () => {
         </div>
         
         {isCropping ? (
-            <div className="flex gap-2">
-                <button 
-                    onClick={() => setIsCropping(false)}
-                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95"
-                >
-                    <CloseIcon size={18} />
-                    <span>Отмена</span>
-                </button>
-                <button 
-                    onClick={handleApplyCrop}
-                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-900/20"
-                >
-                    <Check size={18} />
-                    <span>Применить</span>
-                </button>
+            <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-xs sm:text-sm text-slate-300 cursor-pointer select-none">
+                    <input 
+                        type="checkbox" 
+                        checked={shrinkToNewSize} 
+                        onChange={(e) => setShrinkToNewSize(e.target.checked)}
+                        className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Урезать размер (не растягивать)</span>
+                </label>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => setIsCropping(false)}
+                        className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95"
+                    >
+                        <CloseIcon size={18} />
+                        <span>Отмена</span>
+                    </button>
+                    <button 
+                        onClick={handleApplyCrop}
+                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-900/20"
+                    >
+                        <Check size={18} />
+                        <span>Применить</span>
+                    </button>
+                </div>
             </div>
         ) : (
             <div className="flex gap-2">
